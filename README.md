@@ -21,7 +21,7 @@ In today's multitasking world, managing multiple open windows efficiently is cru
     windres resource.rc -o resource.o
     ```
     ```sh
-    g++ ManageMultipleOpenWindows.cpp resource.o -o ManageMultipleOpenWindows -lgdi32 -luser32 -lpsapi -lcomctl32 -static-libgcc -static-libstdc++ -mwindows
+    g++ ManageMultipleOpenWindows.cpp resource.o -o ManageMultipleOpenWindows -lgdi32 -luser32 -lpsapi -lcomctl32 -static-libgcc -static-libstdc++ -static -mwindows
     ```
 
 ## Usage
