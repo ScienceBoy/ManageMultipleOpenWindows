@@ -1,0 +1,2 @@
+#define IDI_MYICON 101
+#define ID_TRAY_EXIT 40001
