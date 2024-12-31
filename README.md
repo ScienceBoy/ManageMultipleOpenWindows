@@ -17,8 +17,12 @@ In today's multitasking world, managing multiple open windows efficiently is cru
     cd manage-multiple-open-windows
     ```
 3. Build the project using your preferred C++ compiler. Example with g++:
+    ```sh
     windres resource.rc -o resource.o
+    ```
+    ```sh
     g++ ManageMultipleOpenWindows.cpp resource.o -o ManageMultipleOpenWindows -lgdi32 -luser32 -lpsapi -lcomctl32 -mwindows
+    ```
 
 ## Usage
 1. Run the executable file generated after building the project.
