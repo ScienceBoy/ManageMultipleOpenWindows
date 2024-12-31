@@ -8,6 +8,9 @@ In today's multitasking world, managing multiple open windows efficiently is cru
 - **Minimize, Restore, Close, and Arrange Windows**: Easily minimize, restore, close, or arrange selected windows with a single click.
 
 ## Installation
+Ddownload all files into a folder and start **ManageMultipleOpenWindows.exe** from there.
+
+If you prefer, you could also re-build the executables:
 1. Clone the repository:
     ```sh
     git clone https://github.com/yourusername/manage-multiple-open-windows.git
