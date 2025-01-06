@@ -1,5 +1,6 @@
 # ManageMultipleOpenWindows
-Powerful way to control and organize all your open windows with ease. **Minimize**, **restore** and **arrange** one, many or all **windows at once**
+Lost in too many open windows? Cannot find the window you are looking for?
+Here is a powerful way to control and organize all your open windows with ease. **Minimize**, **restore** and **arrange** one, many or all **windows at once**
 
 In today's multitasking world, managing multiple open windows efficiently is crucial for productivity. Whether you're a developer, a designer, or just someone who loves to keep things organized, having a tool that helps you manage your open windows can save you time and reduce frustration. The functions provided in "Manage Multiple Open Windows", like minimize all windows at once or arrange them automatically, were missing for me and my colleagues in Windows OS. 
 
