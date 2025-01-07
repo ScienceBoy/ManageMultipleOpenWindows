@@ -8,6 +8,8 @@
 #include "resource.h" // Include resource header file
 #include <cmath> // Include mathematical functions
 #include <windowsx.h> // Include Windowsx header file, which defines macros like GET_X_LPARAM and GET_Y_LPARAM
+#include <cctype>
+#include <commctrl.h>
 
 #pragma comment(lib, "psapi.lib") // Link psapi.lib library
 
@@ -48,11 +50,12 @@ static HWND arrangeButton; // Handle of the arrange button
 std::vector<WindowInfo> currentWindows; // Vector to store current windows
 static bool initialized = false; // Status indicating if the application is initialized
 static std::unordered_map<std::wstring, HWND> expandButtons; // Hashmap to store expand buttons
-static HWND grayBar; // Handle of the gray bar
+static HWND whiteBar; // Handle of the white bar
 static HWND minimizeButton; // Handle of the minimize button
 static HWND restoreButton; // Handle of the restore button
 static bool isScrolling = false; // Variable to track if scrolling is in progress
 static POINT lastMousePos = {0, 0}; // Variable to store the last mouse position
+HWND hwndTT;
 
 // Callback function to list open windows
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
@@ -171,6 +174,48 @@ bool HasWindowsChanged() {
     return false; // No changes detected
 }
 
+// Function to move the window to the main monitor
+void MoveWindowToMainMonitor(HWND hwnd) {
+    ShowWindow(hwnd, SW_RESTORE); // Restore the window
+
+    // Get the handle to the primary monitor
+    HMONITOR hMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+
+    // Get the monitor info
+    MONITORINFO mi = { sizeof(mi) };
+    if (GetMonitorInfo(hMonitor, &mi)) {
+        // Calculate the new position for the window
+        int newX = mi.rcWork.left;
+        int newY = mi.rcWork.top;
+
+        // Move the window to the new position
+        SetWindowPos(hwnd, HWND_TOP, newX, newY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
+    }
+}
+
+
+// Function to allow sorting case-insensitive
+bool caseInsensitiveCompare(const std::wstring& a, const std::wstring& b) {
+    std::wstring lowerA = a;
+    std::wstring lowerB = b;
+    std::transform(lowerA.begin(), lowerA.end(), lowerA.begin(), ::towlower);
+    std::transform(lowerB.begin(), lowerB.end(), lowerB.begin(), ::towlower);
+    return lowerA < lowerB;
+}
+
+// Function to allow on-mouse-over tooltip
+HWND CreateTooltip(HWND hwndParent) {
+    HWND hwndTT = CreateWindowEx(WS_EX_TOPMOST, TOOLTIPS_CLASS, NULL,
+        WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,        
+        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
+        hwndParent, NULL, GetModuleHandle(NULL), NULL);
+
+    SetWindowPos(hwndTT, HWND_TOPMOST, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+    return hwndTT;
+}
+
 // Function to update the window list
 void UpdateWindowList(HWND hwnd) {
     // Function to update the window list
@@ -189,10 +234,10 @@ void UpdateWindowList(HWND hwnd) {
     }
     expandButtons.clear(); // Clear the button list
 
-    // Destroy the gray bar and control buttons if they exist
-    if (grayBar) { // Check if the gray bar exists
-        DestroyWindow(grayBar); // Destroy the gray bar
-        grayBar = NULL; // Reset the pointer
+    // Destroy the white bar and control buttons if they exist
+    if (whiteBar) { // Check if the white bar exists
+        DestroyWindow(whiteBar); // Destroy the white bar
+        whiteBar = NULL; // Reset the pointer
     }
     if (minimizeButton) { // Check if the minimize button exists
         DestroyWindow(minimizeButton); // Destroy the minimize button
@@ -236,7 +281,7 @@ void UpdateWindowList(HWND hwnd) {
     }
 
     // Sort process names alphabetically
-    std::sort(processNames.begin(), std::end(processNames)); // Sort the process names
+    std::sort(processNames.begin(), std::end(processNames), caseInsensitiveCompare); // Sort the process names
 
     // Set scroll information
     SCROLLINFO si = {}; // Initialize a SCROLLINFO structure
@@ -265,16 +310,16 @@ void UpdateWindowList(HWND hwnd) {
         yPos += 30; // Increase the y-position for the next button
     }
 
-    // Create a gray bar at the bottom of the window
+    // Create a white bar at the bottom of the window
     GetClientRect(hwnd, &rect); // Retrieve the client rectangles of the window
     int scrollbarWidth = GetSystemMetrics(SM_CXVSCROLL); // Retrieve the width of the vertical scrollbar
     int width = rect.right - rect.left - scrollbarWidth; // Calculate the width of the window without the scrollbar
-    grayBar = CreateWindowExW(
+    whiteBar = CreateWindowExW(
         0, // Extended window style
         L"STATIC", // Name of the window class
         NULL, // No text
-        WS_VISIBLE | WS_CHILD | SS_GRAYRECT, // Window style
-        0, rect.bottom - 55, width + scrollbarWidth, 55, // Position and size of the gray bar
+        WS_VISIBLE | WS_CHILD | SS_WHITERECT, // Window style
+        0, rect.bottom - 55, width + scrollbarWidth, 55, // Position and size of the white bar
         hwnd, // Handle of the parent window
         NULL, // No menu
         GetModuleHandle(NULL), // Instance handle
@@ -381,25 +426,34 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     static int scrollPos = 0; // Static variable to store the scroll position
     int id; // Variable to store the ID
     switch (uMsg) { // Check the messages
-        case WM_CREATE: { // Message when creating the window
-            CreateTrayIcon(hwnd); // Create the tray icon
-            if (!initialized) { // Check if not initialized
-                UpdateWindowList(hwnd); // Update the window list
-                initialized = true; // Set initialized
-                MinimizeToTray(hwnd); // Minimize the window to the tray
-            }
-        }
-        break;
-        case WM_TIMER: { // Message on timer event
-            if (wParam == 1) { // Check if the timer is 1
-                if (HasWindowsChanged()) { // Check if the windows have changed
-                    UpdateWindowList(hwnd); // Update the window list
-                    SaveCurrentWindows(); // Save the current windows
-                    AdjustWindowSize(hwnd); // Adjust the window size
-                }
-            }
-        }
-        break;
+case WM_CREATE: {
+    CreateTrayIcon(hwnd);
+    if (!initialized) {
+        UpdateWindowList(hwnd);
+        initialized = true;
+        MinimizeToTray(hwnd);
+    }
+    hwndTT = CreateTooltip(hwnd); // Tooltip-Fenster erstellen
+
+    SCROLLINFO si = {};
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_RANGE | SIF_PAGE;
+    si.nMin = 0;
+    si.nMax = processNames.size() * 30;
+    si.nPage = 10;
+    SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+    scrollPos = 0;
+    //MessageBoxW(hwnd, (L"Initial scrollPos: " + std::to_wstring(scrollPos)).c_str(), L"Info", MB_OK | MB_ICONINFORMATION);
+}
+break;
+
+case WM_TIMER: {
+    if (wParam == 1) {
+        DestroyWindow(hwnd);
+    }
+}
+break;
+
         case WM_DRAWITEM: { // Message when drawing an item
             LPDRAWITEMSTRUCT lpDrawItem = (LPDRAWITEMSTRUCT)lParam; // Draw item structure
             if (lpDrawItem->CtlID >= 3000 && lpDrawItem->CtlID < 3000 + processNames.size()) { // Check the ID
@@ -427,10 +481,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 expandedState[window.processName] = false; // Set the expanded state
                 checkboxState[window.processName] = false; // Set the checkbox state
             }
+
             for (const auto& entry : processWindowsMap) { // Iterate through the process window map
                 processNames.push_back(entry.first); // Add the process name
             }
-            std::sort(processNames.begin(), std::end(processNames)); // Sort the process names
+            std::sort(processNames.begin(), std::end(processNames), caseInsensitiveCompare); // Sort the process names
             SCROLLINFO si = {}; // Initialize scroll info
             si.cbSize = sizeof(si); // Set the size of the scroll info
             si.fMask = SIF_RANGE | SIF_PAGE; // Set the mask
@@ -441,30 +496,30 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             InvalidateRect(hwnd, NULL, TRUE); // Invalidate the rectangle
             AdjustWindowSize(hwnd); // Adjust the window size
         }
-        break;
-        case WM_VSCROLL: { // Message on vertical scroll
-            SCROLLINFO si = {}; // Initialize scroll info
-            si.cbSize = sizeof(si); // Set the size of the scroll info
-            si.fMask = SIF_ALL; // Set the mask
-            GetScrollInfo(hwnd, SB_VERT, &si); // Retrieve the scroll info
-            int yPos = si.nPos; // Retrieve the Y position
-            switch (LOWORD(wParam)) { // Check the scroll message
-                case SB_LINEUP: yPos -= 1; break; // Scroll one line up
-                case SB_LINEDOWN: yPos += 1; break; // Scroll one line down
-                case SB_PAGEUP: yPos -= si.nPage; break; // Scroll one page up
-                case SB_PAGEDOWN: yPos += si.nPage; break; // Scroll one page down
-                case SB_THUMBTRACK: yPos = HIWORD(wParam); break; // Thumb track
-            }
-            yPos = std::max(0, std::min(yPos, si.nMax - (int)si.nPage + 1)); // Limit the Y position
-            if (yPos != si.nPos) { // Check if the position has changed
-                si.fMask = SIF_POS; // Set the mask
-                si.nPos = yPos; // Set the position
-                SetScrollInfo(hwnd, SB_VERT, &si, TRUE); // Set the scroll info
-                scrollPos = yPos; // Set the scroll position
-                InvalidateRect(hwnd, NULL, TRUE); // Invalidate the rectangle
-            }
-        }
-        break;
+case WM_VSCROLL: {
+    SCROLLINFO si = {};
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_ALL;
+    GetScrollInfo(hwnd, SB_VERT, &si);
+    int yPos = si.nPos;
+    switch (LOWORD(wParam)) {
+        case SB_LINEUP: yPos -= 1; break;
+        case SB_LINEDOWN: yPos += 1; break;
+        case SB_PAGEUP: yPos -= si.nPage; break;
+        case SB_PAGEDOWN: yPos += si.nPage; break;
+        case SB_THUMBTRACK: yPos = HIWORD(wParam); break;
+    }
+    yPos = std::max(0, std::min(yPos, si.nMax - (int)si.nPage + 1));
+    if (yPos != si.nPos) {
+        si.fMask = SIF_POS;
+        si.nPos = yPos;
+        SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+        scrollPos = yPos;
+        InvalidateRect(hwnd, NULL, TRUE);
+    }
+    //MessageBoxW(hwnd, (L"Updated scrollPos: " + std::to_wstring(scrollPos)).c_str(), L"Info", MB_OK | MB_ICONINFORMATION);
+}
+break;
         case WM_COMMAND: { // Message when a command is executed (e.g., button click)
             id = LOWORD(wParam); // Extract the command ID from wParam
             if (id == 2000) { // Check if the ID is 2000 (Minimize)
@@ -497,8 +552,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 for (const auto& entry : processWindowsMap) { // Iterate through all processes
                     for (const auto& window : entry.second) { // Iterate through all windows of a process
                         if (window.checked) { // Check if the window is selected
+			    MoveWindowToMainMonitor(window.hwnd); // Move the window to the main monitor
+			    ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
                             ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
                             SetForegroundWindow(window.hwnd); // Bring the window to the foreground
+			    //SetWindowPos(window.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); // Ensure the window is brought to the top of the Z-order
                             ProcessMessages(); // Process messages
                         }
                     }
@@ -573,8 +631,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 for (const auto& entry : processWindowsMap) { // Iterate through all processes
                     for (const auto& window : entry.second) { // Iterate through all windows of a process
                         if (window.checked) { // Check if the window is selected
+			    MoveWindowToMainMonitor(window.hwnd); // Move the window to the main monitor
                             ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
                             ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
+			    SetForegroundWindow(window.hwnd); // Bring the window to the foreground
+			    //SetWindowPos(window.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); // Ensure the window is brought to the top of the Z-order
                             ProcessMessages(); // Process messages
                             Sleep(100); // Short pause
                             MoveWindow(window.hwnd, x, y, windowWidth, windowHeight, TRUE); // Move and resize the window
@@ -703,16 +764,45 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     SetScrollInfo(hwnd, SB_VERT, &si, TRUE); // Set the scroll info
                     RECT scrollRect;
                     GetClientRect(hwnd, &scrollRect);
-                    scrollRect.bottom -= 55; // Area without gray bar
+                    scrollRect.bottom -= 55; // Area without white bar
                     ScrollWindowEx(hwnd, 0, deltaY, &scrollRect, &scrollRect, NULL, NULL, SW_INVALIDATE | SW_ERASE); 
                     InvalidateRect(hwnd, &scrollRect, TRUE); // Invalidate and redraw the rectangle
                 }
                 InvalidateRect(hwnd, NULL, TRUE); // Invalidate and redraw the rectangle
                 lastMousePos = currentMousePos; // Update the last mouse position
-            }
-        }
-        break;
-        
+  	  } else {
+        	POINT pt; 
+	        GetCursorPos(&pt); 
+	        ScreenToClient(hwnd, &pt); 
+	
+	        int yPos = 0 - scrollPos;
+	
+                for (size_t i = 0; i < processNames.size(); ++i) {
+                    const auto& processName = processNames[i];
+                    RECT rect = { 30, yPos, 400, yPos + 30 };
+                    if (PtInRect(&rect, pt)) {
+                        TOOLINFOW ti = { 0 }; 
+                        ti.cbSize = sizeof(TOOLINFOW);
+                        ti.uFlags = TTF_SUBCLASS;
+                        ti.hwnd = hwnd;
+                        ti.hinst = GetModuleHandle(NULL);
+                        ti.lpszText = const_cast<LPWSTR>(processName.c_str()); 
+                        ti.rect = rect;
+                        //SendMessage(hwndTT, TTM_ADDTOOL, 0, (LPARAM)&ti);  // tooltip does not yet work correctly. Shows only first letter of the name
+  			//SendMessage(hwndTT, TTM_SETMAXTIPWIDTH, 0, 300);  // tooltip does not yet work correctly. Shows only first letter of the name
+  			//SendMessage(hwndTT, TTM_UPDATETIPTEXT, 0, (LPARAM)&ti);  // tooltip does not yet work correctly. Shows only first letter of the name
+                        break;
+                    }
+                    yPos += 30;
+                    if (expandedState[processName]) {
+                        yPos += processWindowsMap[processName].size() * 30;
+                    }
+                }
+	    }
+	}
+	break;
+
+
         case WM_LBUTTONUP: { // Message when the left mouse button is released
             isScrolling = false; // Stop scrolling
             ReleaseCapture(); // Release the mouse
@@ -792,8 +882,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             SetScrollInfo(hwnd, SB_VERT, &si, TRUE); // Set the scroll information for the vertical scrollbar
             int scrollbarWidth = GetSystemMetrics(SM_CXVSCROLL); // Retrieve the width of the vertical scrollbar
             int width = rect.right - rect.left - scrollbarWidth; // Calculate the width of the window without the scrollbar
-            int yPos = rect.bottom - 55; // Calculate the y-position for the gray bar
-            SetWindowPos(grayBar, NULL, 0, yPos, width + scrollbarWidth, 55, SWP_NOZORDER); // Position the gray bar
+            int yPos = rect.bottom - 55; // Calculate the y-position for the white bar
+            SetWindowPos(whiteBar, NULL, 0, yPos, width + scrollbarWidth, 55, SWP_NOZORDER); // Position the white bar
 
             int buttonCount = 4; // Number of buttons
             int buttonWidth = (width - 20) / buttonCount; // Calculate the width of a button
