@@ -1,3 +1,14 @@
 #include "resource.h"
 
 IDI_MYICON ICON "icon.ico"
+
+IDR_MAINMENU MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "Minimize", ID_MINIMIZE
+        MENUITEM "Restore", ID_RESTORE
+        MENUITEM "Close", ID_CLOSE
+        MENUITEM "Arrange", ID_ARRANGE
+    END
+END

@@ -10,18 +10,32 @@
 #include <windowsx.h> // Include Windowsx header file, which defines macros like GET_X_LPARAM and GET_Y_LPARAM
 #include <cctype>
 #include <commctrl.h>
+#include <map>
+#include <shellapi.h>
 
 #pragma comment(lib, "psapi.lib") // Link psapi.lib library
 
 #define WM_TRAYICON (WM_USER + 1) // Define a custom message for the tray icon
 #define WM_UPDATE_LIST (WM_USER + 2) // Define a custom message to update the window list
+#define ID_MINIMIZE 2000
+#define ID_RESTORE  2001
+#define ID_CLOSE    2002
+#define ID_ARRANGE  2003
+#define ID_MOVE_TO_SCREEN_BASE 2004
 
 // Structure to store window information
 struct WindowInfo {
     HWND hwnd; // Handle of the window
     std::wstring title; // Title of the window
     std::wstring processName; // Name of the associated process
+    std::wstring exePath;
     bool checked; // Status indicating if the window is selected
+    bool arranged; 
+};
+
+struct MonitorInfo {
+    int index;
+    RECT rect;
 };
 
 // Function declarations
@@ -39,57 +53,64 @@ void ProcessMessages(); // Function to process messages
 void SaveCurrentWindows(); // Function to save the current windows
 bool HasWindowsChanged(); // Function to check if the windows have changed
 bool ConfirmClose(HWND hwnd); // Function to confirm closing windows
+RECT GetScreenRect(int screenIndex);
+BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData);
 
 // Global variables
 static std::unordered_map<std::wstring, std::vector<WindowInfo>> processWindowsMap; // Hashmap to store windows by processes
 static std::unordered_map<std::wstring, bool> expandedState; // Hashmap to store the expanded state of processes
 static std::vector<std::wstring> processNames; // Vector to store process names
 static std::unordered_map<std::wstring, bool> checkboxState; // Hashmap to store the checkbox state
-static HWND closeButton; // Handle of the close button
-static HWND arrangeButton; // Handle of the arrange button
+//static HWND closeButton; // Handle of the close button
+//static HWND arrangeButton; // Handle of the arrange button
+//static HWND minimizeButton; // Handle of the minimize button
+//static HWND restoreButton; // Handle of the restore button
 std::vector<WindowInfo> currentWindows; // Vector to store current windows
 static bool initialized = false; // Status indicating if the application is initialized
 static std::unordered_map<std::wstring, HWND> expandButtons; // Hashmap to store expand buttons
 static HWND whiteBar; // Handle of the white bar
-static HWND minimizeButton; // Handle of the minimize button
-static HWND restoreButton; // Handle of the restore button
 static bool isScrolling = false; // Variable to track if scrolling is in progress
 static POINT lastMousePos = {0, 0}; // Variable to store the last mouse position
+static std::map<std::wstring, HICON> processIcons; // Map for prozess icons
+int screenCount = 1;
 HWND hwndTT;
 
 // Callback function to list open windows
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
-    wchar_t title[256]; // Buffer for the window title
-    DWORD processId; // Process ID
-    GetWindowThreadProcessId(hwnd, &processId); // Retrieve the process ID of the window
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId); // Open the process
+    wchar_t title[256]; // Buffer für den Fenstertitel
+    DWORD processId; // Prozess-ID
+    GetWindowThreadProcessId(hwnd, &processId); // Prozess-ID des Fensters abrufen
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId); // Prozess öffnen
     if (hProcess) {
-        wchar_t processName[MAX_PATH]; // Buffer for the process name
-        if (GetModuleBaseNameW(hProcess, NULL, processName, sizeof(processName) / sizeof(wchar_t))) { // Retrieve the process name
-            // List of processes to exclude as they are created by Windows and not useful to the user
-            std::vector<std::wstring> excludedProcesses = {
-                L"TextInputHost.exe",
-                L"SearchUI.exe",
-                L"ShellExperienceHost.exe",
-                L"SystemSettings.exe",
-                L"ApplicationFrameHost.exe",
-                L"RuntimeBroker.exe",
-                L"sihost.exe",
-                L"dwm.exe",
-                L"smartscreen.exe",
-                L"window_minimizer.exe"
-            };
-            if (IsWindowVisible(hwnd) && std::find(excludedProcesses.begin(), excludedProcesses.end(), processName) == excludedProcesses.end()) { // Check if the window is visible and not excluded
-                int length = GetWindowTextW(hwnd, title, sizeof(title) / sizeof(wchar_t)); // Retrieve the window title
-                if (length > 0 && wcscmp(title, L"Program Manager") != 0) { // Exclude "Program Manager"
-                    std::vector<WindowInfo>* windows = reinterpret_cast<std::vector<WindowInfo>*>(lParam); // Cast lParam to a vector of WindowInfo
-                    windows->emplace_back(WindowInfo{ hwnd, title, processName, false }); // Add the window to the list
+        wchar_t exePath[MAX_PATH]; // Buffer für den Pfad zur ausführbaren Datei
+        if (GetModuleFileNameExW(hProcess, NULL, exePath, sizeof(exePath) / sizeof(wchar_t))) { // Pfad zur ausführbaren Datei abrufen
+            wchar_t processName[MAX_PATH]; // Buffer für den Prozessnamen
+            if (GetModuleBaseNameW(hProcess, NULL, processName, sizeof(processName) / sizeof(wchar_t))) { // Prozessnamen abrufen
+                // Liste der auszuschließenden Prozesse, die von Windows erstellt werden und für den Benutzer nicht nützlich sind
+                std::vector<std::wstring> excludedProcesses = {
+                    L"TextInputHost.exe",
+                    L"SearchUI.exe",
+                    L"ShellExperienceHost.exe",
+                    L"SystemSettings.exe",
+                    L"ApplicationFrameHost.exe",
+                    L"RuntimeBroker.exe",
+                    L"sihost.exe",
+                    L"dwm.exe",
+                    L"smartscreen.exe",
+                    L"window_minimizer.exe"
+                };
+                if (IsWindowVisible(hwnd) && std::find(excludedProcesses.begin(), excludedProcesses.end(), processName) == excludedProcesses.end()) { // Überprüfen, ob das Fenster sichtbar und nicht ausgeschlossen ist
+                    int length = GetWindowTextW(hwnd, title, sizeof(title) / sizeof(wchar_t)); // Fenstertitel abrufen
+                    if (length > 0 && wcscmp(title, L"Program Manager") != 0) { // "Program Manager" ausschließen
+                        std::vector<WindowInfo>* windows = reinterpret_cast<std::vector<WindowInfo>*>(lParam); // lParam in einen Vektor von WindowInfo umwandeln
+                        windows->emplace_back(WindowInfo{ hwnd, title, processName, exePath, false }); // Fenster zur Liste hinzufügen
+                    }
                 }
             }
         }
-        CloseHandle(hProcess); // Close the process handle
+        CloseHandle(hProcess); // Prozesshandle schließen
     }
-    return TRUE; // Continue enumeration
+    return TRUE; // Enumeration fortsetzen
 }
 
 // Function to return open windows
@@ -151,6 +172,43 @@ void SaveCurrentWindows() {
     currentWindows = getOpenWindows(); // Save the current windows
 }
 
+void MoveWindowToScreen(HWND hwnd, int screenIndex) {
+    WINDOWPLACEMENT wp;     // Überprüfe, ob das Fenster maximiert ist
+    wp.length = sizeof(WINDOWPLACEMENT);
+    GetWindowPlacement(hwnd, &wp);
+
+    bool wasMaximized = (wp.showCmd == SW_SHOWMAXIMIZED);
+
+    if (wasMaximized) {
+        ShowWindow(hwnd, SW_RESTORE); // Fenster wiederherstellen, wenn es maximiert ist
+    }
+
+    RECT screenRect = GetScreenRect(screenIndex);     // Verschiebe das Fenster auf den neuen Bildschirm
+    SetWindowPos(hwnd, NULL, screenRect.left, screenRect.top, screenRect.right - screenRect.left, screenRect.bottom - screenRect.top, SWP_NOZORDER);
+
+    if (wasMaximized) {
+        // Fenster wieder maximieren
+        ShowWindow(hwnd, SW_MAXIMIZE);
+    }
+}
+
+RECT GetScreenRect(int screenIndex) {
+    MonitorInfo monitorInfo = { screenIndex, {0, 0, 0, 0} };
+
+    EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, (LPARAM)&monitorInfo);
+    return monitorInfo.rect;
+}
+
+BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
+    MonitorInfo* pMonitorInfo = (MonitorInfo*)dwData;
+    if (pMonitorInfo->index == 0) {
+        pMonitorInfo->rect = *lprcMonitor;
+        return FALSE; // Stop enumeration
+    }
+    pMonitorInfo->index--;
+    return TRUE; // Continue enumeration
+}
+
 // Function to check if the windows have changed
 bool HasWindowsChanged() {
     // Retrieve the current open windows
@@ -176,7 +234,15 @@ bool HasWindowsChanged() {
 
 // Function to move the window to the main monitor
 void MoveWindowToMainMonitor(HWND hwnd) {
-    ShowWindow(hwnd, SW_RESTORE); // Restore the window
+    WINDOWPLACEMENT wp;     // Überprüfe, ob das Fenster maximiert ist
+    wp.length = sizeof(WINDOWPLACEMENT);
+    GetWindowPlacement(hwnd, &wp);
+
+    bool wasMaximized = (wp.showCmd == SW_SHOWMAXIMIZED);
+
+    if (wasMaximized) {
+        ShowWindow(hwnd, SW_RESTORE); // Fenster wiederherstellen, wenn es maximiert ist
+    }
 
     // Get the handle to the primary monitor
     HMONITOR hMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
@@ -191,8 +257,13 @@ void MoveWindowToMainMonitor(HWND hwnd) {
         // Move the window to the new position
         SetWindowPos(hwnd, HWND_TOP, newX, newY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
     }
-}
 
+    
+    if (wasMaximized) {
+        // Fenster wieder maximieren
+        ShowWindow(hwnd, SW_MAXIMIZE);
+    }
+}
 
 // Function to allow sorting case-insensitive
 bool caseInsensitiveCompare(const std::wstring& a, const std::wstring& b) {
@@ -218,169 +289,183 @@ HWND CreateTooltip(HWND hwndParent) {
 
 // Function to update the window list
 void UpdateWindowList(HWND hwnd) {
-    // Function to update the window list
+    // Funktion zum Aktualisieren der Fensterliste
 
-    // Clear window content
-    RECT rect; // Declaration of a RECT structure to store the window size
-    GetClientRect(hwnd, &rect); // Retrieve the client rectangles of the window
-    HDC hdc = GetDC(hwnd); // Retrieve the device context
-    HBRUSH hBrush = (HBRUSH)GetStockObject(WHITE_BRUSH); // Create a white brush
-    FillRect(hdc, &rect, hBrush); // Fill the rectangle with white color
-    ReleaseDC(hwnd, hdc); // Release the device context
+    // Fensterinhalt löschen
+    RECT rect;
+    GetClientRect(hwnd, &rect);
+    HDC hdc = GetDC(hwnd);
+    HBRUSH hBrush = (HBRUSH)GetStockObject(WHITE_BRUSH);
+    FillRect(hdc, &rect, hBrush);
+    ReleaseDC(hwnd, hdc);
 
-    // Destroy old controls
-    for (auto& button : expandButtons) { // Iterate through all expandButtons
-        DestroyWindow(button.second); // Destroy each button
+    // Alte Steuerelemente zerstören
+    for (auto& button : expandButtons) {
+        DestroyWindow(button.second);
     }
-    expandButtons.clear(); // Clear the button list
+    expandButtons.clear();
 
-    // Destroy the white bar and control buttons if they exist
-    if (whiteBar) { // Check if the white bar exists
-        DestroyWindow(whiteBar); // Destroy the white bar
-        whiteBar = NULL; // Reset the pointer
+    /*if (whiteBar) {
+        DestroyWindow(whiteBar);
+        whiteBar = NULL;
     }
-    if (minimizeButton) { // Check if the minimize button exists
-        DestroyWindow(minimizeButton); // Destroy the minimize button
-        minimizeButton = NULL; // Reset the pointer
+    if (minimizeButton) {
+        DestroyWindow(minimizeButton);
+        minimizeButton = NULL;
     }
-    if (restoreButton) { // Check if the restore button exists
-        DestroyWindow(restoreButton); // Destroy the restore button
-        restoreButton = NULL; // Reset the pointer
+    if (restoreButton) {
+        DestroyWindow(restoreButton);
+        restoreButton = NULL;
     }
-    if (closeButton) { // Check if the close button exists
-        DestroyWindow(closeButton); // Destroy the close button
-        closeButton = NULL; // Reset the pointer
+    if (closeButton) {
+        DestroyWindow(closeButton);
+        closeButton = NULL;
     }
-    if (arrangeButton) { // Check if the arrange button exists
-        DestroyWindow(arrangeButton); // Destroy the arrange button
-        arrangeButton = NULL; // Reset the pointer
-    }
+    if (arrangeButton) {
+        DestroyWindow(arrangeButton);
+        arrangeButton = NULL;
+    }*/
 
-    // Clear the window and state maps
-    processWindowsMap.clear(); // Clear the map that associates windows with processes
-    processNames.clear(); // Clear the list of process names
-    checkboxState.clear(); // Clear the map that stores the checkbox state
-    expandedState.clear(); // Clear the map that stores the expanded state
+    // Fenster- und Zustandskarten löschen
+    processWindowsMap.clear();
+    processNames.clear();
+    checkboxState.clear();
+    expandedState.clear();
 
-    // Retrieve windows
-    auto windows = getOpenWindows(); // Retrieve the current open windows
-    if (windows.empty()) { // Check if no windows were found
-        // MessageBoxW(hwnd, L"No windows found", L"Debug Info", MB_OK); // Debug output (commented out)
-    }
-
-    // Associate windows with their respective processes
-    for (auto& window : windows) { // Iterate through all found windows
-        processWindowsMap[window.processName].push_back(window); // Add the window to the respective process
-        expandedState[window.processName] = false; // Default to not expanded
-        checkboxState[window.processName] = false; // Default to not selected
+    // Fenster abrufen
+    auto windows = getOpenWindows();
+    if (windows.empty()) {
+        // MessageBoxW(hwnd, L"No windows found", L"Debug Info", MB_OK);
     }
 
-    // Insert process names into a list
-    for (const auto& entry : processWindowsMap) { // Iterate through all entries in the map
-        processNames.push_back(entry.first); // Add the process name to the list
+    // Fenster den jeweiligen Prozessen zuordnen
+    for (auto& window : windows) {
+        processWindowsMap[window.processName].push_back(window);
+        expandedState[window.processName] = false;
+        checkboxState[window.processName] = false;
     }
 
-    // Sort process names alphabetically
-    std::sort(processNames.begin(), std::end(processNames), caseInsensitiveCompare); // Sort the process names
+    // Prozessnamen in eine Liste einfügen
+    for (const auto& entry : processWindowsMap) {
+        processNames.push_back(entry.first);
+    }
 
-    // Set scroll information
-    SCROLLINFO si = {}; // Initialize a SCROLLINFO structure
-    si.cbSize = sizeof(si); // Set the size of the SCROLLINFO structure
-    si.fMask = SIF_RANGE | SIF_PAGE; // Specify the masks to use
-    si.nMin = 0; // Set the minimum scroll range
-    si.nMax = processNames.size() * 30; // Set the maximum scroll range based on the number of processes
-    si.nPage = 10; // Set the page length for scrolling
-    SetScrollInfo(hwnd, SB_VERT, &si, TRUE); // Set the scroll information for the vertical scrollbar
+    // Prozessnamen alphabetisch sortieren
+    std::sort(processNames.begin(), std::end(processNames), caseInsensitiveCompare);
 
-    // Create buttons for the processes
-    int yPos = 60; // Initialize the y-position for the buttons
-    for (size_t i = 0; i < processNames.size(); ++i) { // Iterate through all process names
+    // Scrollinformationen setzen
+    SCROLLINFO si = {};
+    si.cbSize = sizeof(si);
+    si.fMask = SIF_RANGE | SIF_PAGE;
+    si.nMin = 0;
+    si.nMax = processNames.size() * 30;
+    si.nPage = 10;
+    SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+
+    // Schaltflächen für die Prozesse erstellen
+    int yPos = 60;
+    for (size_t i = 0; i < processNames.size(); ++i) {
         HWND expandButton = CreateWindowExW(
-            0, // Extended window style
-            L"BUTTON", // Name of the window class
-            L">", // Text of the button
-            WS_VISIBLE | WS_CHILD | BS_OWNERDRAW, // Window style
-            10, yPos, 30, 30, // Position and size of the button
-            hwnd, // Handle of the parent window
-            (HMENU)(3000 + i), // Menu handle (ID of the button)
-            GetModuleHandle(NULL), // Instance handle
-            NULL // No additional parameters
+            0,
+            L"BUTTON",
+            L">",
+            WS_VISIBLE | WS_CHILD | BS_OWNERDRAW,
+            10, yPos, 30, 30,
+            hwnd,
+            (HMENU)(3000 + i),
+            GetModuleHandle(NULL),
+            NULL
         );
-        expandButtons[processNames[i]] = expandButton; // Add the button to the map
-        yPos += 30; // Increase the y-position for the next button
+        expandButtons[processNames[i]] = expandButton;
+        yPos += 30;
     }
 
-    // Create a white bar at the bottom of the window
-    GetClientRect(hwnd, &rect); // Retrieve the client rectangles of the window
-    int scrollbarWidth = GetSystemMetrics(SM_CXVSCROLL); // Retrieve the width of the vertical scrollbar
-    int width = rect.right - rect.left - scrollbarWidth; // Calculate the width of the window without the scrollbar
+    /*// Weiße Leiste am unteren Rand des Fensters erstellen
+    GetClientRect(hwnd, &rect);
+    int scrollbarWidth = GetSystemMetrics(SM_CXVSCROLL);
+    int width = rect.right - rect.left - scrollbarWidth;
     whiteBar = CreateWindowExW(
-        0, // Extended window style
-        L"STATIC", // Name of the window class
-        NULL, // No text
-        WS_VISIBLE | WS_CHILD | SS_WHITERECT, // Window style
-        0, rect.bottom - 55, width + scrollbarWidth, 55, // Position and size of the white bar
-        hwnd, // Handle of the parent window
-        NULL, // No menu
-        GetModuleHandle(NULL), // Instance handle
-        NULL // No additional parameters
+        0,
+        L"STATIC",
+        NULL,
+        WS_VISIBLE | WS_CHILD | SS_WHITERECT,
+        0, rect.bottom - 55, width + scrollbarWidth, 55,
+        hwnd,
+        NULL,
+        GetModuleHandle(NULL),
+        NULL
     );
 
-    // Create buttons for minimize, restore, close, and arrange
-    int buttonCount = 4; // Number of buttons
-    int buttonWidth = (width - 20) / buttonCount; // Calculate the width of a button
+    // Schaltflächen für Minimieren, Wiederherstellen, Schließen und Anordnen erstellen
+    int buttonCount = 4;
+    int buttonWidth = (width - 20) / buttonCount;
 
     minimizeButton = CreateWindowW(
-        L"BUTTON", // Name of the window class
-        L"Minimize\nWindow(s)", // Text of the button
-        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_MULTILINE, // Window style
-        10, rect.bottom - 50, buttonWidth, 40, // Position and size of the button
-        hwnd, // Handle of the parent window
-        (HMENU)2000, // Menu handle (ID of the button)
-        GetModuleHandle(NULL), // Instance handle
-        NULL // No additional parameters
+        L"BUTTON",
+        L"Minimize\nWindow(s)",
+        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_MULTILINE,
+        10, rect.bottom - 50, buttonWidth, 40,
+        hwnd,
+        (HMENU)2000,
+        GetModuleHandle(NULL),
+        NULL
     );
 
     restoreButton = CreateWindowW(
-        L"BUTTON", // Name of the window class
-        L"Restore\nWindow(s)", // Text of the button
-        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_MULTILINE, // Window style
-        10 + buttonWidth + 5, rect.bottom - 50, buttonWidth, 40, // Position and size of the button
-        hwnd, // Handle of the parent window
-        (HMENU)2001, // Menu handle (ID of the button)
-        GetModuleHandle(NULL), // Instance handle
-        NULL // No additional parameters
+        L"BUTTON",
+        L"Restore\nWindow(s)",
+        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_MULTILINE,
+        10 + buttonWidth + 5, rect.bottom - 50, buttonWidth, 40,
+        hwnd,
+        (HMENU)2001,
+        GetModuleHandle(NULL),
+        NULL
     );
 
     closeButton = CreateWindowW(
-        L"BUTTON", // Name of the window class
-        L"Close\nWindow(s)", // Text of the button
-        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_MULTILINE, // Window style
-        10 + 2 * (buttonWidth + 5), rect.bottom - 50, buttonWidth, 40, // Position and size of the button
-        hwnd, // Handle of the parent window
-        (HMENU)2002, // Menu handle (ID of the button)
-        GetModuleHandle(NULL), // Instance handle
-        NULL // No additional parameters
+        L"BUTTON",
+        L"Close\nWindow(s)",
+        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_MULTILINE,
+        10 + 2 * (buttonWidth + 5), rect.bottom - 50, buttonWidth, 40,
+        hwnd,
+        (HMENU)2002,
+        GetModuleHandle(NULL),
+        NULL
     );
 
     arrangeButton = CreateWindowW(
-        L"BUTTON", // Name of the window class
-        L"Arrange\nWindow(s)", // Text of the button
-        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_MULTILINE, // Window style
-        10 + 3 * (buttonWidth + 5), rect.bottom - 50, buttonWidth, 40, // Position and size of the button
-        hwnd, // Handle of the parent window
-        (HMENU)2003, // Menu handle (ID of the button)
-        GetModuleHandle(NULL), // Instance handle
-        NULL // No additional parameters
-    );
+        L"BUTTON",
+        L"Arrange\nWindow(s)",
+        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_PUSHBUTTON | BS_MULTILINE,
+        10 + 3 * (buttonWidth + 5), rect.bottom - 50, buttonWidth, 40,
+        hwnd,
+        (HMENU)2003,
+        GetModuleHandle(NULL),
+        NULL
+    );*/
 
-    // Save current windows and adjust window size
-    SaveCurrentWindows(); // Save current windows
-    AdjustWindowSize(hwnd); // Adjust window size
+    // Aktuelle Fenster speichern und Fenstergröße anpassen
+    SaveCurrentWindows();
+    AdjustWindowSize(hwnd);
 
-    // Debug output
-    // std::wstring debugMessage = L"Number of windows found: " + std::to_wstring(windows.size());
-    // MessageBoxW(hwnd, debugMessage.c_str(), L"Debug Info", MB_OK);
+    // Icons für die Prozesse laden und in der Map speichern
+    HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
+    for (const auto& processName : processNames) {
+        auto it = windows.end();
+        for (auto winIt = windows.begin(); winIt != windows.end(); ++winIt) {
+            if (winIt->processName == processName) {
+                it = winIt;
+                break;
+            }
+        }
+        if (it != windows.end()) {
+            HICON hIcon = ExtractIconW(hInstance, it->exePath.c_str(), 0);
+            if (hIcon == NULL) {
+                hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MYICON)); // Verwende das Standard-Icon, wenn kein spezifisches Icon gefunden wird
+            }
+            processIcons[processName] = hIcon;
+        }
+    }
 }
 
 // Function to adjust the window size
@@ -396,7 +481,7 @@ void AdjustWindowSize(HWND hwnd) {
     int screenHeight = GetSystemMetrics(SM_CYSCREEN); // Retrieve the screen height
     int titleBarHeight = GetSystemMetrics(SM_CYCAPTION); // Retrieve the title bar height
     int usableScreenHeight = screenHeight - titleBarHeight - 25; // Calculate the usable screen height
-    int contentHeight = si.nMax + 30 + 70; // Calculate the content height
+    int contentHeight = si.nMax + 30 + 40; //Calculate the content height
     int contentWidth = 500; // Set the content width
     int newHeight = std::min(contentHeight, usableScreenHeight); // Calculate the new window height
     int xPos = (GetSystemMetrics(SM_CXSCREEN) - contentWidth) / 2; // Calculate the X position of the window
@@ -415,6 +500,14 @@ void RefreshWindowList(HWND hwnd) {
     UpdateWindowList(hwnd); // Update the window list
 }
 
+bool compareWindowsByName(const WindowInfo& a, const WindowInfo& b) {
+    std::wstring nameA = a.title;
+    std::wstring nameB = b.title;
+    std::transform(nameA.begin(), nameA.end(), nameA.begin(), ::tolower);
+    std::transform(nameB.begin(), nameB.end(), nameB.begin(), ::tolower);
+    return nameA < nameB; // Sort windows by window name case-insensitive
+}
+
 // Function to confirm closing windows
 bool ConfirmClose(HWND hwnd) {
     int result = MessageBoxW(hwnd, L"Do you really want to close the selected windows?", L"Yes", MB_YESNO | MB_ICONQUESTION | MB_TOPMOST); // Display confirmation dialog
@@ -425,34 +518,74 @@ bool ConfirmClose(HWND hwnd) {
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     static int scrollPos = 0; // Static variable to store the scroll position
     int id; // Variable to store the ID
+    static HIMAGELIST hImageList;
+    static HICON hIcon1;
+
     switch (uMsg) { // Check the messages
-case WM_CREATE: {
-    CreateTrayIcon(hwnd);
-    if (!initialized) {
-        UpdateWindowList(hwnd);
-        initialized = true;
-        MinimizeToTray(hwnd);
-    }
-    hwndTT = CreateTooltip(hwnd); // Tooltip-Fenster erstellen
+        case WM_CREATE: {
+            CreateTrayIcon(hwnd);
+            if (!initialized) {
+                UpdateWindowList(hwnd);
+                initialized = true;
+                MinimizeToTray(hwnd);
+            }
+            hwndTT = CreateTooltip(hwnd);
 
-    SCROLLINFO si = {};
-    si.cbSize = sizeof(si);
-    si.fMask = SIF_RANGE | SIF_PAGE;
-    si.nMin = 0;
-    si.nMax = processNames.size() * 30;
-    si.nPage = 10;
-    SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
-    scrollPos = 0;
-    //MessageBoxW(hwnd, (L"Initial scrollPos: " + std::to_wstring(scrollPos)).c_str(), L"Info", MB_OK | MB_ICONINFORMATION);
-}
-break;
+            HMENU hMenu = CreateMenu();
 
-case WM_TIMER: {
-    if (wParam == 1) {
-        DestroyWindow(hwnd);
-    }
-}
-break;
+            AppendMenu(hMenu, MF_STRING, ID_MINIMIZE, "Minimize");
+            AppendMenu(hMenu, MF_STRING, ID_RESTORE, "Restore");
+            AppendMenu(hMenu, MF_STRING, ID_CLOSE, "Close");
+            AppendMenu(hMenu, MF_STRING, ID_ARRANGE, "Arrange");
+            HMENU hMoveToScreenMenu = CreateMenu();
+            screenCount = GetSystemMetrics(SM_CMONITORS);
+            for (int i = 1; i <= screenCount; ++i) {
+                std::wstring menuText = L"Screen " + std::to_wstring(i);
+                AppendMenuW(hMoveToScreenMenu, MF_STRING, ID_MOVE_TO_SCREEN_BASE + i, menuText.c_str());
+            }
+            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMoveToScreenMenu, L"Move to Screen");
+
+            SetMenu(hwnd, hMenu);
+
+            SCROLLINFO si = {};
+            si.cbSize = sizeof(si);
+            si.fMask = SIF_RANGE | SIF_PAGE;
+            si.nMin = 0;
+            si.nMax = processNames.size() * 30;
+            si.nPage = 10;
+            SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+            scrollPos = 0;
+
+            HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
+            hIcon1 = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MYICON));
+
+            auto windows = getOpenWindows();
+            // Lade Icons für jeden Prozess und speichere sie in der Map
+            for (const auto& processName : processNames) {
+                auto it = windows.end();
+                for (auto winIt = windows.begin(); winIt != windows.end(); ++winIt) {
+                    if (winIt->processName == processName) {
+                        it = winIt;
+                        break;
+                    }
+                }
+                if (it != windows.end()) {
+                    HICON hIcon = ExtractIconW(hInstance, it->exePath.c_str(), 0);
+                    if (hIcon == NULL) {
+                        hIcon = hIcon1;
+                    }
+                    processIcons[processName] = hIcon;
+                }
+            }
+        }
+        break;
+
+        case WM_TIMER: {
+            if (wParam == 1) {
+                DestroyWindow(hwnd);
+            }
+        }
+        break;
 
         case WM_DRAWITEM: { // Message when drawing an item
             LPDRAWITEMSTRUCT lpDrawItem = (LPDRAWITEMSTRUCT)lParam; // Draw item structure
@@ -465,6 +598,7 @@ break;
                 SetBkMode(lpDrawItem->hDC, TRANSPARENT); // Set the background mode
                 SetTextColor(lpDrawItem->hDC, RGB(0, 0, 0)); // Set the text color
                 DrawTextW(lpDrawItem->hDC, &buttonText, 1, &lpDrawItem->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE); // Draw the text
+                InvalidateRect(hwnd, NULL, TRUE);
                 return TRUE; // Return TRUE
             }
         }
@@ -482,7 +616,8 @@ break;
                 checkboxState[window.processName] = false; // Set the checkbox state
             }
 
-            for (const auto& entry : processWindowsMap) { // Iterate through the process window map
+            for (auto& entry : processWindowsMap) { // Iterate through the process window map
+                std::sort(entry.second.begin(), entry.second.end(), compareWindowsByName); // Sort windows by window name
                 processNames.push_back(entry.first); // Add the process name
             }
             std::sort(processNames.begin(), std::end(processNames), caseInsensitiveCompare); // Sort the process names
@@ -496,36 +631,42 @@ break;
             InvalidateRect(hwnd, NULL, TRUE); // Invalidate the rectangle
             AdjustWindowSize(hwnd); // Adjust the window size
         }
-case WM_VSCROLL: {
-    SCROLLINFO si = {};
-    si.cbSize = sizeof(si);
-    si.fMask = SIF_ALL;
-    GetScrollInfo(hwnd, SB_VERT, &si);
-    int yPos = si.nPos;
-    switch (LOWORD(wParam)) {
-        case SB_LINEUP: yPos -= 1; break;
-        case SB_LINEDOWN: yPos += 1; break;
-        case SB_PAGEUP: yPos -= si.nPage; break;
-        case SB_PAGEDOWN: yPos += si.nPage; break;
-        case SB_THUMBTRACK: yPos = HIWORD(wParam); break;
-    }
-    yPos = std::max(0, std::min(yPos, si.nMax - (int)si.nPage + 1));
-    if (yPos != si.nPos) {
-        si.fMask = SIF_POS;
-        si.nPos = yPos;
-        SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
-        scrollPos = yPos;
-        InvalidateRect(hwnd, NULL, TRUE);
-    }
-    //MessageBoxW(hwnd, (L"Updated scrollPos: " + std::to_wstring(scrollPos)).c_str(), L"Info", MB_OK | MB_ICONINFORMATION);
-}
-break;
+        break;
+        case WM_VSCROLL: {
+            SCROLLINFO si = {};
+            si.cbSize = sizeof(si);
+            si.fMask = SIF_ALL;
+            GetScrollInfo(hwnd, SB_VERT, &si);
+            int yPos = si.nPos;
+            switch (LOWORD(wParam)) {
+                case SB_LINEUP: yPos -= 1; break;
+                case SB_LINEDOWN: yPos += 1; break;
+                case SB_PAGEUP: yPos -= si.nPage; break;
+                case SB_PAGEDOWN: yPos += si.nPage; break;
+                case SB_THUMBTRACK: yPos = HIWORD(wParam); break;
+            }
+            yPos = std::max(0, std::min(yPos, si.nMax - (int)si.nPage + 1));
+            if (yPos != si.nPos) {
+                si.fMask = SIF_POS;
+                si.nPos = yPos;
+                SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+                scrollPos = yPos;
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            //MessageBoxW(hwnd, (L"Updated scrollPos: " + std::to_wstring(scrollPos)).c_str(), L"Info", MB_OK | MB_ICONINFORMATION);
+        }
+        break;
         case WM_COMMAND: { // Message when a command is executed (e.g., button click)
             id = LOWORD(wParam); // Extract the command ID from wParam
             if (id == 2000) { // Check if the ID is 2000 (Minimize)
-                for (const auto& entry : processWindowsMap) { // Iterate through all processes
-                    for (const auto& window : entry.second) { // Iterate through all windows of a process
+                int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+                int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+                for (auto& entry : processWindowsMap) { // Iterate through all processes
+                    for (auto& window : entry.second) { // Iterate through all windows of a process
                         if (window.checked) { // Check if the window is selected
+                            SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
+                            //ProcessMessages(); // Process messages
+                            window.arranged = false; // Setze arranged auf false, nachdem das Fenster vergrößert wurde
                             ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
                             ProcessMessages(); // Process messages
                         }
@@ -552,11 +693,12 @@ break;
                 for (const auto& entry : processWindowsMap) { // Iterate through all processes
                     for (const auto& window : entry.second) { // Iterate through all windows of a process
                         if (window.checked) { // Check if the window is selected
-			    MoveWindowToMainMonitor(window.hwnd); // Move the window to the main monitor
-			    ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
+                            //MoveWindowToScreen(window.hwnd, 1);
+                            MoveWindowToMainMonitor(window.hwnd); // Move the window to the main monitor
+                            ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
                             ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
                             SetForegroundWindow(window.hwnd); // Bring the window to the foreground
-			    //SetWindowPos(window.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); // Ensure the window is brought to the top of the Z-order
+			                //SetWindowPos(window.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); // Ensure the window is brought to the top of the Z-order
                             ProcessMessages(); // Process messages
                         }
                     }
@@ -613,9 +755,10 @@ break;
                 int screenHeight = GetSystemMetrics(SM_CYSCREEN); // Retrieve the screen height
 
                 int numWindows = 0; // Counter for the number of windows
-                for (const auto& entry : processWindowsMap) { // Iterate through all processes
-                    for (const auto& window : entry.second) { // Iterate through all windows of a process
+                for (auto& entry : processWindowsMap) { // Iterate through all processes
+                    for (auto& window : entry.second) { // Iterate through all windows of a process
                         if (window.checked) { // Check if the window is selected
+                            window.arranged = true; 
                             numWindows++; // Increment the counter
                         }
                     }
@@ -631,13 +774,17 @@ break;
                 for (const auto& entry : processWindowsMap) { // Iterate through all processes
                     for (const auto& window : entry.second) { // Iterate through all windows of a process
                         if (window.checked) { // Check if the window is selected
-			    MoveWindowToMainMonitor(window.hwnd); // Move the window to the main monitor
+                            ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
+                            SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
+                            //MoveWindowToScreen(window.hwnd, 1);
+			                MoveWindowToMainMonitor(window.hwnd); // Move the window to the main monitor
+                            ProcessMessages(); // Process messages
                             ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
                             ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
-			    SetForegroundWindow(window.hwnd); // Bring the window to the foreground
-			    //SetWindowPos(window.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); // Ensure the window is brought to the top of the Z-order
+                            SetForegroundWindow(window.hwnd); // Bring the window to the foreground
+                            //SetWindowPos(window.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); // Ensure the window is brought to the top of the Z-order
                             ProcessMessages(); // Process messages
-                            Sleep(100); // Short pause
+                            Sleep(150); // Short pause
                             MoveWindow(window.hwnd, x, y, windowWidth, windowHeight, TRUE); // Move and resize the window
                             ProcessMessages(); // Process messages
                             x += windowWidth; // Increment the X position
@@ -668,6 +815,21 @@ break;
                 ProcessMessages(); // Process messages
             } else if (id == ID_TRAY_EXIT) { // Check if the ID is for tray exit
                 PostQuitMessage(0); // Quit the application
+            } else if (id >= 2004 && id <= 2004 + screenCount) { // Check if the ID is 2004ff (Move to Screen x)
+                int screenIndex = screenCount - (id - ID_MOVE_TO_SCREEN_BASE); // Handle move to screen action
+                for (const auto& entry : processWindowsMap) { // Iterate through all processes
+                    for (const auto& window : entry.second) { // Iterate through all windows of a process
+                        if (window.checked) { // Check if the window is selected
+                            MoveWindowToScreen(window.hwnd, screenIndex);
+                        }
+                    }
+                }
+                InvalidateRect(hwnd, NULL, TRUE); // Invalidate and redraw the window
+                UpdateWindowList(hwnd); // Update the window list
+                AdjustWindowSize(hwnd); // Adjust the window size
+                ProcessMessages(); // Process messages
+                Sleep(100); // Short pause
+                MinimizeToTray(hwnd); // Minimize the window to the tray
             } else if (id >= 3000 && id < 3000 + processNames.size()) { // Check if the ID is within the range of process names
                 std::wstring processName = processNames[id - 3000]; // Retrieve the process name based on the ID
                 checkboxState[processName] = !checkboxState[processName]; // Toggle the checkbox state for the process
@@ -764,7 +926,7 @@ break;
                     SetScrollInfo(hwnd, SB_VERT, &si, TRUE); // Set the scroll info
                     RECT scrollRect;
                     GetClientRect(hwnd, &scrollRect);
-                    scrollRect.bottom -= 55; // Area without white bar
+                    //scrollRect.bottom -= 55; // Area without white bar
                     ScrollWindowEx(hwnd, 0, deltaY, &scrollRect, &scrollRect, NULL, NULL, SW_INVALIDATE | SW_ERASE); 
                     InvalidateRect(hwnd, &scrollRect, TRUE); // Invalidate and redraw the rectangle
                 }
@@ -801,8 +963,7 @@ break;
 	    }
 	}
 	break;
-
-
+    
         case WM_LBUTTONUP: { // Message when the left mouse button is released
             isScrolling = false; // Stop scrolling
             ReleaseCapture(); // Release the mouse
@@ -826,51 +987,85 @@ break;
                 scrollPos = yPos; // Scroll-Position setzen
                 RECT scrollRect;
                 GetClientRect(hwnd, &scrollRect);
-                scrollRect.bottom -= 55; // Bereich ohne grauen Balken
+                //scrollRect.bottom -= 55; // Bereich ohne grauen Balken
                 ScrollWindowEx(hwnd, 0, delta / WHEEL_DELTA * 30, &scrollRect, &scrollRect, NULL, NULL, SW_INVALIDATE | SW_ERASE); 
                 InvalidateRect(hwnd, &scrollRect, TRUE); // Rechteck ungültig machen und neu zeichnen
             }
         }
         break;
         
-        case WM_PAINT: { // Message when the window needs to be repainted
-            PAINTSTRUCT ps; // Declaration of a PAINTSTRUCT structure
-            HDC hdc = BeginPaint(hwnd, &ps); // Begin the painting process and retrieve the device context
-            int yPos = 0 - scrollPos; // Initialize the y-position based on the scroll position
-            HFONT hFont = CreateFont(24, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, TEXT("Segoe UI Symbol")); // Create a font
-            HFONT hOldFont = (HFONT)SelectObject(hdc, hFont); // Select the new font and save the old font
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
 
-            RECT clientRect; // Declaration of a RECT structure to store the client rectangles
-            GetClientRect(hwnd, &clientRect); // Retrieve the client rectangles of the window
-            int scrollbarWidth = GetSystemMetrics(SM_CXVSCROLL); // Retrieve the width of the vertical scrollbar
-            int textWidth = clientRect.right - scrollbarWidth - 30; // Calculate the width of the text area
+            // Erstelle einen Offscreen-Puffer
+            HDC hdcMem = CreateCompatibleDC(hdc);
+            RECT clientRect;
+            GetClientRect(hwnd, &clientRect);
+            HBITMAP hbmMem = CreateCompatibleBitmap(hdc, clientRect.right, clientRect.bottom);
+            HBITMAP hbmOld = (HBITMAP)SelectObject(hdcMem, hbmMem);
 
-            for (size_t i = 0; i < processNames.size(); ++i) { // Iterate through all process names
-                const auto& processName = processNames[i]; // Retrieve the current process name
-                std::wstring text = L"  " + std::wstring(checkboxState[processName] ? L"\u2611 " : L"\u2610 ") + std::wstring(processName.begin(), processName.end()); // Create the text with checkbox
-                RECT rect = { 30, yPos, textWidth, yPos + 30 }; // Define a rectangle for the text
-                SetTextColor(hdc, RGB(0, 0, 0)); // Set the text color to black
-                DrawTextW(hdc, text.c_str(), -1, &rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS); // Draw the text
-                SetWindowPos(expandButtons[processName], NULL, 10, yPos, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW); // Position the expand button
-                yPos += 30; // Increase the y-position
-                if (expandedState[processName]) { // Check if the process is expanded
-                    for (size_t j = 0; j < processWindowsMap[processName].size(); ++j) { // Iterate through all windows of the process
-                        const auto& window = processWindowsMap[processName][j]; // Retrieve the current window
-                        std::wstring windowText = L"  " + std::wstring(window.checked ? L"\u2611 " : L"\u2610 ") + std::wstring(window.title.begin(), window.title.end()); // Create the text with checkbox for the window
-                        RECT windowRect = { 50, yPos, textWidth, yPos + 30 }; // Define a rectangle for the window text
-                        SetTextColor(hdc, RGB(0, 0, 255)); // Set the text color to blue
-                        DrawTextW(hdc, windowText.c_str(), -1, &windowRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS); // Draw the text for the window
-                        yPos += 30; // Increase the y-position
+            // Hintergrund des Offscreen-Puffers füllen
+            HBRUSH hBrush = CreateSolidBrush(RGB(255, 255, 255)); // Weißer Hintergrund
+            FillRect(hdcMem, &clientRect, hBrush);
+            DeleteObject(hBrush);
+
+            // Zeichne das UI im Offscreen-Puffer
+            int yPos = 0 - scrollPos;
+            HFONT hFont = CreateFont(24, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, TEXT("Segoe UI Symbol"));
+            HFONT hOldFont = (HFONT)SelectObject(hdcMem, hFont);
+
+            int scrollbarWidth = GetSystemMetrics(SM_CXVSCROLL);
+            int textWidth = clientRect.right - scrollbarWidth - 30;
+
+            for (size_t i = 0; i < processNames.size(); ++i) {
+                const auto& processName = processNames[i];
+                std::wstring text = L"       " + std::wstring(checkboxState[processName] ? L"\u2611 " : L"\u2610 ") + std::wstring(processName.begin(), processName.end());
+                RECT rect = { 30, yPos, textWidth, yPos + 30 };
+                SetTextColor(hdcMem, RGB(0, 0, 0));
+                DrawTextW(hdcMem, text.c_str(), -1, &rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+                // Icon des Prozesses zeichnen
+                DrawIconEx(hdcMem, rect.left + 10, yPos + 5, processIcons[processName], 20, 20, 0, NULL, DI_NORMAL);
+
+                SetWindowPos(expandButtons[processName], HWND_TOPMOST, 10, yPos, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
+                yPos += 30;
+                if (expandedState[processName]) {
+                    // Fenster-Namen sortieren
+                    auto& windows = processWindowsMap[processName];
+                    std::sort(windows.begin(), windows.end(), compareWindowsByName);
+
+                    for (size_t j = 0; j < windows.size(); ++j) {
+                        const auto& window = windows[j];
+                        std::wstring windowText = L"       " + std::wstring(window.checked ? L"\u2611 " : L"\u2610 ") + std::wstring(window.title.begin(), window.title.end());
+                        RECT windowRect = { 50, yPos, textWidth, yPos + 30 };
+                        SetTextColor(hdcMem, RGB(0, 0, 255));
+                        DrawTextW(hdcMem, windowText.c_str(), -1, &windowRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+                        // Icon des Fensters zeichnen (verwende das gleiche Icon wie für den Prozess)
+                        DrawIconEx(hdcMem, windowRect.left + 10, yPos + 7, processIcons[processName], 16, 16, 0, NULL, DI_NORMAL);
+
+                        yPos += 30;
                     }
                 }
             }
-            yPos += 30; // Increase the y-position
-            yPos += 30; // Increase the y-position
-            SelectObject(hdc, hOldFont); // Restore the old font
-            DeleteObject(hFont); // Delete the new font
-            EndPaint(hwnd, &ps); // End the painting process
+            //yPos += 30;
+            //yPos += 30;
+            SelectObject(hdcMem, hOldFont);
+            DeleteObject(hFont);
+
+            // Kopiere den Offscreen-Puffer auf den Bildschirm
+            BitBlt(hdc, 0, 0, clientRect.right, clientRect.bottom, hdcMem, 0, 0, SRCCOPY);
+
+            // Bereinige
+            SelectObject(hdcMem, hbmOld);
+            DeleteObject(hbmMem);
+            DeleteDC(hdcMem);
+
+            EndPaint(hwnd, &ps);
         }
         break;
+
 
         case WM_SIZE: { // Message when the window size is changed
             RECT rect; // Declaration of a RECT structure to store the client rectangles
@@ -885,14 +1080,14 @@ break;
             int yPos = rect.bottom - 55; // Calculate the y-position for the white bar
             SetWindowPos(whiteBar, NULL, 0, yPos, width + scrollbarWidth, 55, SWP_NOZORDER); // Position the white bar
 
-            int buttonCount = 4; // Number of buttons
-            int buttonWidth = (width - 20) / buttonCount; // Calculate the width of a button
+            // int buttonCount = 4; // Number of buttons
+            // int buttonWidth = (width - 20) / buttonCount; // Calculate the width of a button
 
             // Position the buttons for minimize, restore, close, and arrange
-            SetWindowPos(minimizeButton, NULL, 10, yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
-            SetWindowPos(restoreButton, NULL, 10 + buttonWidth + 5, yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
-            SetWindowPos(closeButton, NULL, 10 + 2 * (buttonWidth + 5), yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
-            SetWindowPos(arrangeButton, NULL, 10 + 3 * (buttonWidth + 5), yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
+            // SetWindowPos(minimizeButton, NULL, 10, yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
+            // SetWindowPos(restoreButton, NULL, 10 + buttonWidth + 5, yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
+            // SetWindowPos(closeButton, NULL, 10 + 2 * (buttonWidth + 5), yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
+            // SetWindowPos(arrangeButton, NULL, 10 + 3 * (buttonWidth + 5), yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
         }
         break;
 
