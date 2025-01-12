@@ -6,9 +6,9 @@ IDR_MAINMENU MENU
 BEGIN
     POPUP "&File"
     BEGIN
-        MENUITEM "Minimize", ID_MINIMIZE
-        MENUITEM "Restore", ID_RESTORE
-        MENUITEM "Close", ID_CLOSE
-        MENUITEM "Arrange", ID_ARRANGE
+        MENUITEM "Minimize Selected Windows", ID_MINIMIZE
+        MENUITEM "Restore Selected Windows", ID_RESTORE
+        MENUITEM "Arrange Selected Windows", ID_ARRANGE
+        MENUITEM "Close Selected Windows", ID_CLOSE
     END
 END

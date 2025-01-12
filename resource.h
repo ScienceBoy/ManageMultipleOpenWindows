@@ -1,2 +1,7 @@
 #define IDI_MYICON 101
 #define ID_TRAY_EXIT 40001
+#define ID_MINIMIZE 2000
+#define ID_RESTORE  2001
+#define ID_CLOSE    2002
+#define ID_ARRANGE  2003
+#define ID_MOVE_TO_SCREEN_BASE 2104

@@ -20,8 +20,9 @@
 #define ID_MINIMIZE 2000
 #define ID_RESTORE  2001
 #define ID_CLOSE    2002
-#define ID_ARRANGE  2003
-#define ID_MOVE_TO_SCREEN_BASE 2004
+#define ID_ARRANGE  2003 // Needs 2003-200x for enumerate all screens
+#define ID_MAXIMIZE 2050
+#define ID_MOVE_TO_SCREEN_BASE 2104
 
 // Structure to store window information
 struct WindowInfo {
@@ -36,7 +37,9 @@ struct WindowInfo {
 struct MonitorInfo {
     int index;
     RECT rect;
+    std::wstring position;
 };
+
 
 // Function declarations
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam); // Callback function to list open windows
@@ -134,7 +137,7 @@ void CreateTrayIcon(HWND hwnd) {
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP; // Flags for the tray icon
     nid.uCallbackMessage = WM_TRAYICON; // Message for the tray icon
     nid.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_MYICON)); // Load the icon
-    wcscpy_s(nid.szTip, sizeof(nid.szTip) / sizeof(wchar_t), L"Minimize and Restore"); // Tooltip for the tray icon
+    wcscpy_s(nid.szTip, sizeof(nid.szTip) / sizeof(wchar_t), L"Minimize, Maximize, Restore, Close, Arrange or Many Move Windows at Once"); // Tooltip for the tray icon
     Shell_NotifyIconW(NIM_ADD, &nid); // Add the tray icon
 }
 
@@ -172,41 +175,167 @@ void SaveCurrentWindows() {
     currentWindows = getOpenWindows(); // Save the current windows
 }
 
+bool CompareMonitors(const MonitorInfo& a, const MonitorInfo& b) {
+    return a.rect.left < b.rect.left;
+}
+
+RECT GetScreenRect(int screenIndex) {
+    std::vector<MonitorInfo> monitors;
+    EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, (LPARAM)&monitors);
+
+    if (screenIndex < 0 || screenIndex >= monitors.size()) {
+        //MessageBox(NULL, "Ungueltiger Bildschirm-Index", "Fehler", MB_OK | MB_ICONERROR);
+        return {0, 0, 0, 0};
+    }
+
+    return monitors[screenIndex].rect;
+}
+
+BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
+    std::vector<MonitorInfo>* monitors = reinterpret_cast<std::vector<MonitorInfo>*>(dwData);
+    
+    MONITORINFOEX mi;
+    mi.cbSize = sizeof(mi);
+    if (GetMonitorInfo(hMonitor, &mi)) {
+        monitors->push_back({static_cast<int>(monitors->size()), mi.rcMonitor, L""});
+    }
+    return TRUE;
+}
+
 void MoveWindowToScreen(HWND hwnd, int screenIndex) {
-    WINDOWPLACEMENT wp;     // Überprüfe, ob das Fenster maximiert ist
+    if (!IsWindow(hwnd)) {
+        //MessageBox(NULL, "Ungueltiges Fenster-Handle", "Fehler", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    WINDOWPLACEMENT wp;
     wp.length = sizeof(WINDOWPLACEMENT);
-    GetWindowPlacement(hwnd, &wp);
+    if (!GetWindowPlacement(hwnd, &wp)) {
+        //MessageBox(NULL, "Fehler beim Abrufen der Fensterplatzierung", "Fehler", MB_OK | MB_ICONERROR);
+        return;
+    }
 
     bool wasMaximized = (wp.showCmd == SW_SHOWMAXIMIZED);
 
     if (wasMaximized) {
-        ShowWindow(hwnd, SW_RESTORE); // Fenster wiederherstellen, wenn es maximiert ist
+        ShowWindow(hwnd, SW_RESTORE);
     }
 
-    RECT screenRect = GetScreenRect(screenIndex);     // Verschiebe das Fenster auf den neuen Bildschirm
-    SetWindowPos(hwnd, NULL, screenRect.left, screenRect.top, screenRect.right - screenRect.left, screenRect.bottom - screenRect.top, SWP_NOZORDER);
+    RECT screenRect = GetScreenRect(screenIndex);
+    if (screenRect.left == 0 && screenRect.top == 0 && screenRect.right == 0 && screenRect.bottom == 0) {
+        //MessageBox(NULL, "Ungueltiger Bildschirm-Index", "Fehler", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    if (!SetWindowPos(hwnd, NULL, screenRect.left, screenRect.top, screenRect.right - screenRect.left, screenRect.bottom - screenRect.top, SWP_NOZORDER | SWP_SHOWWINDOW)) {
+        //MessageBox(NULL, "Fehler beim Verschieben des Fensters", "Fehler", MB_OK | MB_ICONERROR);
+        return;
+    }
 
     if (wasMaximized) {
-        // Fenster wieder maximieren
-        ShowWindow(hwnd, SW_MAXIMIZE);
+        //ShowWindow(hwnd, SW_MAXIMIZE);
     }
 }
 
-RECT GetScreenRect(int screenIndex) {
-    MonitorInfo monitorInfo = { screenIndex, {0, 0, 0, 0} };
 
-    EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, (LPARAM)&monitorInfo);
-    return monitorInfo.rect;
+HBITMAP CaptureAndResizeScreen(HWND hwnd, RECT rect, int width, int height) {
+    HDC hdcScreen = GetDC(NULL);
+    HDC hdcMem = CreateCompatibleDC(hdcScreen);
+    HBITMAP hbmScreen = CreateCompatibleBitmap(hdcScreen, rect.right - rect.left, rect.bottom - rect.top);
+    SelectObject(hdcMem, hbmScreen);
+    BitBlt(hdcMem, 0, 0, rect.right - rect.left, rect.bottom - rect.top, hdcScreen, rect.left, rect.top, SRCCOPY);
+
+    HBITMAP hbmResized = CreateCompatibleBitmap(hdcScreen, width, height);
+    HDC hdcResized = CreateCompatibleDC(hdcScreen);
+    SelectObject(hdcResized, hbmResized);
+    SetStretchBltMode(hdcResized, HALFTONE);
+    StretchBlt(hdcResized, 0, 0, width, height, hdcMem, 0, 0, rect.right - rect.left, rect.bottom - rect.top, SRCCOPY);
+
+    // Draw a blue border around the resized image
+    HPEN hPen = CreatePen(PS_SOLID, 1, RGB(0, 0, 255)); // Create a blue pen with a width of 1
+    HGDIOBJ hOldPen = SelectObject(hdcResized, hPen);
+    HGDIOBJ hOldBrush = SelectObject(hdcResized, GetStockObject(NULL_BRUSH));
+    Rectangle(hdcResized, 0, 0, width, height); // Draw the rectangle
+    SelectObject(hdcResized, hOldPen);
+    SelectObject(hdcResized, hOldBrush);
+    DeleteObject(hPen);
+
+    DeleteDC(hdcMem);
+    DeleteDC(hdcResized);
+    ReleaseDC(NULL, hdcScreen);
+    DeleteObject(hbmScreen);
+
+    return hbmResized;
 }
 
-BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
-    MonitorInfo* pMonitorInfo = (MonitorInfo*)dwData;
-    if (pMonitorInfo->index == 0) {
-        pMonitorInfo->rect = *lprcMonitor;
-        return FALSE; // Stop enumeration
+void AddMenuItemWithImage(HMENU hMenu, UINT uIDNewItem, HBITMAP hBitmap, const std::wstring& text) {
+    MENUITEMINFOW mii = { sizeof(MENUITEMINFOW) };
+    mii.fMask = MIIM_BITMAP | MIIM_STRING | MIIM_ID;
+    mii.wID = uIDNewItem;
+    mii.dwTypeData = const_cast<LPWSTR>(text.c_str());
+    mii.cch = static_cast<UINT>(text.size());
+    mii.hbmpItem = hBitmap;
+    InsertMenuItemW(hMenu, uIDNewItem, FALSE, &mii);
+}
+
+void CreateMoveToScreenMenu(HMENU hMenu) {
+    HMENU hMoveToScreenMenu = CreateMenu();
+    std::vector<MonitorInfo> monitors;
+    EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, reinterpret_cast<LPARAM>(&monitors));
+    screenCount = -1;
+
+    for (const auto& monitor : monitors) {
+        screenCount++;
+        int width = monitor.rect.right - monitor.rect.left;
+        int height = monitor.rect.bottom - monitor.rect.top;
+        std::wstring menuText = L"Screen " + std::to_wstring(monitor.index) + L" (" + 
+                                std::to_wstring(width) + L"x" + 
+                                std::to_wstring(height) + L")";
+
+        // Berechne das neue Seitenverhältnis
+        int newWidth, newHeight;
+        if (width > height) {
+            newWidth = 25;
+            newHeight = static_cast<int>(30.0 * height / width);
+        } else {
+            newHeight = 25;
+            newWidth = static_cast<int>(30.0 * width / height);
+        }
+
+        HBITMAP hBitmap = CaptureAndResizeScreen(NULL, monitor.rect, newWidth, newHeight);
+        AddMenuItemWithImage(hMoveToScreenMenu, ID_MOVE_TO_SCREEN_BASE + monitor.index, hBitmap, menuText);
     }
-    pMonitorInfo->index--;
-    return TRUE; // Continue enumeration
+    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMoveToScreenMenu, L"Mo&ve Window(s)");
+}
+
+void CreateArrangeOnScreenMenu(HMENU hMenu) {
+    HMENU hArrangeOnScreenMenu = CreateMenu();
+    std::vector<MonitorInfo> monitors;
+    EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, reinterpret_cast<LPARAM>(&monitors));
+    screenCount = -1;
+
+    for (const auto& monitor : monitors) {
+        screenCount++;
+        int width = monitor.rect.right - monitor.rect.left;
+        int height = monitor.rect.bottom - monitor.rect.top;
+        std::wstring menuText = L"Screen " + std::to_wstring(monitor.index) + L" (" + 
+                                std::to_wstring(width) + L"x" + 
+                                std::to_wstring(height) + L")";
+
+        // Berechne das neue Seitenverhältnis
+        int newWidth, newHeight;
+        if (width > height) {
+            newWidth = 25;
+            newHeight = static_cast<int>(30.0 * height / width);
+        } else {
+            newHeight = 25;
+            newWidth = static_cast<int>(30.0 * width / height);
+        }
+
+        HBITMAP hBitmap = CaptureAndResizeScreen(NULL, monitor.rect, newWidth, newHeight);
+        AddMenuItemWithImage(hArrangeOnScreenMenu, ID_ARRANGE + monitor.index, hBitmap, menuText);
+    }
+    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hArrangeOnScreenMenu, L"&Arrange Window(s)");
 }
 
 // Function to check if the windows have changed
@@ -234,6 +363,7 @@ bool HasWindowsChanged() {
 
 // Function to move the window to the main monitor
 void MoveWindowToMainMonitor(HWND hwnd) {
+    //MessageBoxW(hwnd, L"aha1", L"Debug Info", MB_OK);
     WINDOWPLACEMENT wp;     // Überprüfe, ob das Fenster maximiert ist
     wp.length = sizeof(WINDOWPLACEMENT);
     GetWindowPlacement(hwnd, &wp);
@@ -256,6 +386,7 @@ void MoveWindowToMainMonitor(HWND hwnd) {
 
         // Move the window to the new position
         SetWindowPos(hwnd, HWND_TOP, newX, newY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
+        //MessageBoxW(hwnd, L"aha", L"Debug Info", MB_OK);
     }
 
     
@@ -482,7 +613,7 @@ void AdjustWindowSize(HWND hwnd) {
     int titleBarHeight = GetSystemMetrics(SM_CYCAPTION); // Retrieve the title bar height
     int usableScreenHeight = screenHeight - titleBarHeight - 25; // Calculate the usable screen height
     int contentHeight = si.nMax + 30 + 40; //Calculate the content height
-    int contentWidth = 500; // Set the content width
+    int contentWidth = 700; // Set the content width
     int newHeight = std::min(contentHeight, usableScreenHeight); // Calculate the new window height
     int xPos = (GetSystemMetrics(SM_CXSCREEN) - contentWidth) / 2; // Calculate the X position of the window
     int yPos = (usableScreenHeight - newHeight) / 2; // Calculate the Y position of the window
@@ -520,6 +651,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     int id; // Variable to store the ID
     static HIMAGELIST hImageList;
     static HICON hIcon1;
+    static HMENU hMenu = NULL;
 
     switch (uMsg) { // Check the messages
         case WM_CREATE: {
@@ -533,17 +665,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
             HMENU hMenu = CreateMenu();
 
-            AppendMenu(hMenu, MF_STRING, ID_MINIMIZE, "Minimize");
-            AppendMenu(hMenu, MF_STRING, ID_RESTORE, "Restore");
-            AppendMenu(hMenu, MF_STRING, ID_CLOSE, "Close");
-            AppendMenu(hMenu, MF_STRING, ID_ARRANGE, "Arrange");
-            HMENU hMoveToScreenMenu = CreateMenu();
-            screenCount = GetSystemMetrics(SM_CMONITORS);
-            for (int i = 1; i <= screenCount; ++i) {
-                std::wstring menuText = L"Screen " + std::to_wstring(i);
-                AppendMenuW(hMoveToScreenMenu, MF_STRING, ID_MOVE_TO_SCREEN_BASE + i, menuText.c_str());
-            }
-            AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMoveToScreenMenu, L"Move to Screen");
+            AppendMenu(hMenu, MF_STRING, ID_MINIMIZE, "&Minimize Window(s)");
+            AppendMenu(hMenu, MF_STRING, ID_MAXIMIZE, "Ma&ximize Window(s)");        
+            AppendMenu(hMenu, MF_STRING, ID_RESTORE, "&Restore Window(s)");
+            CreateArrangeOnScreenMenu(hMenu); // Arrange
+            CreateMoveToScreenMenu(hMenu); // Move
+            AppendMenu(hMenu, MF_STRING, ID_CLOSE, "&Close Window(s)");
 
             SetMenu(hwnd, hMenu);
 
@@ -658,7 +785,34 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
         case WM_COMMAND: { // Message when a command is executed (e.g., button click)
             id = LOWORD(wParam); // Extract the command ID from wParam
-            if (id == 2000) { // Check if the ID is 2000 (Minimize)
+            //std::wstring message = L"" + std::to_wstring(id);
+            //MessageBoxW(hwnd, message.c_str(), L"Debug Info", MB_OK);
+
+            // Check if the command ID is one of the specified IDs
+            if (id == ID_MINIMIZE || id == ID_MAXIMIZE || id == ID_RESTORE || id == ID_CLOSE || 
+                (id >= ID_ARRANGE && id <= ID_ARRANGE + screenCount) || 
+                (id >= ID_MOVE_TO_SCREEN_BASE && id <= ID_MOVE_TO_SCREEN_BASE + screenCount)) {
+
+                // Check if at least one window is checked
+                bool isChecked = false;
+                for (const auto& entry : processWindowsMap) { // Iterate through all processes
+                    for (const auto& window : entry.second) { // Iterate through all windows of a process
+                        if (window.checked) {
+                            isChecked = true;
+                            break; // Exit the loop as soon as one checked window is found
+                        }
+                    }
+                    if (isChecked) break; // Exit the outer loop as well
+                }
+
+                if (!isChecked) {
+                    MessageBoxW(hwnd, L"Please select one or more window(s).", L"Warning", MB_OK | MB_ICONWARNING);
+                    break; // Exit the WM_COMMAND handler if no window is checked
+                }
+            }
+
+
+            if (id == ID_MINIMIZE) { // Check if the ID is 2000 (Minimize)
                 int screenWidth = GetSystemMetrics(SM_CXSCREEN);
                 int screenHeight = GetSystemMetrics(SM_CYSCREEN);
                 for (auto& entry : processWindowsMap) { // Iterate through all processes
@@ -689,12 +843,43 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 ProcessMessages(); // Process messages
                 Sleep(100); // Short pause
                 MinimizeToTray(hwnd); // Minimize the window to the tray
-            } else if (id == 2001) { // Check if the ID is 2001 (Restore)
+            } else if (id == ID_MAXIMIZE) { // Check if the ID is 2000 (Minimize)
+                int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+                int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+                for (auto& entry : processWindowsMap) { // Iterate through all processes
+                    for (auto& window : entry.second) { // Iterate through all windows of a process
+                        if (window.checked) { // Check if the window is selected
+                            SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
+                            //ProcessMessages(); // Process messages
+                            window.arranged = false; // Setze arranged auf false, nachdem das Fenster vergrößert wurde
+                            ShowWindow(window.hwnd, SW_MAXIMIZE); // Maximize the window
+                            ProcessMessages(); // Process messages
+                        }
+                    }
+                }
+                for (auto& entry : processWindowsMap) { // Iterate through all processes
+                    for (auto& window : entry.second) { // Iterate through all windows of a process
+                        window.checked = false; // Deselect the window
+                    }
+                }
+                for (auto& state : checkboxState) { // Iterate through all checkbox states
+                    state.second = false; // Deselect the checkbox
+                }
+                for (auto& state : expandedState) { // Iterate through all expanded states
+                    state.second = false; // Collapse the expanded state
+                }
+                InvalidateRect(hwnd, NULL, TRUE); // Invalidate and redraw the window
+                UpdateWindowList(hwnd); // Update the window list
+                AdjustWindowSize(hwnd); // Adjust the window size
+                ProcessMessages(); // Process messages
+                Sleep(100); // Short pause
+                MinimizeToTray(hwnd); // Minimize the window to the tray
+            } else if (id == ID_RESTORE) { // Check if the ID is 2001 (Restore)
                 for (const auto& entry : processWindowsMap) { // Iterate through all processes
                     for (const auto& window : entry.second) { // Iterate through all windows of a process
                         if (window.checked) { // Check if the window is selected
                             //MoveWindowToScreen(window.hwnd, 1);
-                            MoveWindowToMainMonitor(window.hwnd); // Move the window to the main monitor
+                            //MoveWindowToMainMonitor(window.hwnd); // Move the window to the main monitor
                             ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
                             ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
                             SetForegroundWindow(window.hwnd); // Bring the window to the foreground
@@ -720,7 +905,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 ProcessMessages(); // Process messages
                 Sleep(100); // Short pause
                 MinimizeToTray(hwnd); // Minimize the window to the tray
-            } else if (id == 2002) { // Check if the ID is 2002 (Close)
+            } else if (id == ID_CLOSE) { // Check if the ID is 2002 (Close)
                 if (ConfirmClose(hwnd)) { // Display confirmation dialog
                     for (const auto& entry : processWindowsMap) { // Iterate through all processes
                         for (const auto& window : entry.second) { // Iterate through all windows of a process
@@ -748,11 +933,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     Sleep(100); // Short pause
                     MinimizeToTray(hwnd); // Minimize the window to the tray
                 }
-            } else if (id == 2003) { // Check if the ID is 2003 (Arrange)
-                RECT rect; // Declaration of a RECT structure
-                GetClientRect(hwnd, &rect); // Retrieve the client rectangles of the window
-                int screenWidth = GetSystemMetrics(SM_CXSCREEN); // Retrieve the screen width
-                int screenHeight = GetSystemMetrics(SM_CYSCREEN); // Retrieve the screen height
+            } else if (id >= ID_ARRANGE && id <= ID_ARRANGE + screenCount) {//else if (id == 2003) { Check if the ID is 2003 (Arrange)
+                //MessageBoxW(hwnd, L"aha2", L"Debug Info", MB_OK);
+                int screenIndex = (id - ID_ARRANGE) ; // Handle move to screen action
+                RECT screenRect = GetScreenRect(screenIndex);
+                //RECT rect; // Declaration of a RECT structure
+                //GetClientRect(hwnd, &rect); // Retrieve the client rectangles of the window
+                //int screenWidth = GetSystemMetrics(SM_CXSCREEN); // Retrieve the screen width
+                int screenWidth = screenRect.right - screenRect.left;
+                int screenHeight = screenRect.bottom - screenRect.top;
+                //int screenHeight = GetSystemMetrics(SM_CYSCREEN); // Retrieve the screen height
 
                 int numWindows = 0; // Counter for the number of windows
                 for (auto& entry : processWindowsMap) { // Iterate through all processes
@@ -776,16 +966,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         if (window.checked) { // Check if the window is selected
                             ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
                             SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
-                            //MoveWindowToScreen(window.hwnd, 1);
-			                MoveWindowToMainMonitor(window.hwnd); // Move the window to the main monitor
+                            MoveWindowToScreen(window.hwnd, screenIndex);
+			                //MoveWindowToMainMonitor(window.hwnd); // Move the window to the main monitor
                             ProcessMessages(); // Process messages
                             ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
                             ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
                             SetForegroundWindow(window.hwnd); // Bring the window to the foreground
                             //SetWindowPos(window.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); // Ensure the window is brought to the top of the Z-order
                             ProcessMessages(); // Process messages
-                            Sleep(150); // Short pause
-                            MoveWindow(window.hwnd, x, y, windowWidth, windowHeight, TRUE); // Move and resize the window
+                            //Sleep(150); // Short pause
+                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth, windowHeight, TRUE); // Move and resize the window
                             ProcessMessages(); // Process messages
                             x += windowWidth; // Increment the X position
                             if (x >= screenWidth) { // Check if the X position exceeds the screen width
@@ -815,9 +1005,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 ProcessMessages(); // Process messages
             } else if (id == ID_TRAY_EXIT) { // Check if the ID is for tray exit
                 PostQuitMessage(0); // Quit the application
-            } else if (id >= 2004 && id <= 2004 + screenCount) { // Check if the ID is 2004ff (Move to Screen x)
-                int screenIndex = screenCount - (id - ID_MOVE_TO_SCREEN_BASE); // Handle move to screen action
-                for (const auto& entry : processWindowsMap) { // Iterate through all processes
+            } else if (id >= ID_MOVE_TO_SCREEN_BASE && id <= ID_MOVE_TO_SCREEN_BASE + screenCount) { // Check if the ID is 2004ff (Move to Screen x)
+                int screenIndex = (id - ID_MOVE_TO_SCREEN_BASE) ; // Handle move to screen action
+                RECT screenRect = GetScreenRect(screenIndex);
+                 for (const auto& entry : processWindowsMap) { // Iterate through all processes
                     for (const auto& window : entry.second) { // Iterate through all windows of a process
                         if (window.checked) { // Check if the window is selected
                             MoveWindowToScreen(window.hwnd, screenIndex);
@@ -831,6 +1022,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 Sleep(100); // Short pause
                 MinimizeToTray(hwnd); // Minimize the window to the tray
             } else if (id >= 3000 && id < 3000 + processNames.size()) { // Check if the ID is within the range of process names
+                //MessageBoxW(hwnd, L"aha3", L"Debug Info", MB_OK);
                 std::wstring processName = processNames[id - 3000]; // Retrieve the process name based on the ID
                 checkboxState[processName] = !checkboxState[processName]; // Toggle the checkbox state for the process
                 for (auto& window : processWindowsMap[processName]) { // Iterate through all windows of the process
@@ -1042,7 +1234,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         SetTextColor(hdcMem, RGB(0, 0, 255));
                         DrawTextW(hdcMem, windowText.c_str(), -1, &windowRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-                        // Icon des Fensters zeichnen (verwende das gleiche Icon wie für den Prozess)
                         DrawIconEx(hdcMem, windowRect.left + 10, yPos + 7, processIcons[processName], 16, 16, 0, NULL, DI_NORMAL);
 
                         yPos += 30;
@@ -1106,19 +1297,63 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         break;
 
-        case WM_TRAYICON: { // Message when interacting with the tray icon
-            if (lParam == WM_LBUTTONUP) { // Check if the left mouse button was released
-                RefreshWindowList(hwnd); // Refresh the window list
-                ShowWindow(hwnd, SW_RESTORE); // Restore the window
-                SaveCurrentWindows(); // Save the current windows
-                AdjustWindowSize(hwnd); // Adjust the window size
-                SetForegroundWindow(hwnd); // Bring the window to the foreground
-            } else if (lParam == WM_RBUTTONUP) { // Check if the right mouse button was released
-                ShowTrayMenu(hwnd); // Show the tray menu
+ case WM_TRAYICON: { 
+    if (lParam == WM_LBUTTONUP) { 
+        // Call the same functions as in WM_CREATE
+        CreateTrayIcon(hwnd);
+        UpdateWindowList(hwnd);
+        hwndTT = CreateTooltip(hwnd);
+
+        HMENU hMenu = CreateMenu();
+        AppendMenu(hMenu, MF_STRING, ID_MINIMIZE, "&Minimize Window(s)");
+        AppendMenu(hMenu, MF_STRING, ID_MAXIMIZE, "Ma&ximize Window(s)");        
+        AppendMenu(hMenu, MF_STRING, ID_RESTORE, "&Restore Window(s)");
+        CreateArrangeOnScreenMenu(hMenu);
+        CreateMoveToScreenMenu(hMenu);
+        AppendMenu(hMenu, MF_STRING, ID_CLOSE, "&Close Window(s)");
+        SetMenu(hwnd, hMenu);
+
+        SCROLLINFO si = {};
+        si.cbSize = sizeof(si);
+        si.fMask = SIF_RANGE | SIF_PAGE;
+        si.nMin = 0;
+        si.nMax = processNames.size() * 30;
+        si.nPage = 10;
+        SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+        scrollPos = 0;
+
+        HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
+        hIcon1 = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MYICON));
+
+        auto windows = getOpenWindows();
+        for (const auto& processName : processNames) {
+            auto it = windows.end();
+            for (auto winIt = windows.begin(); winIt != windows.end(); ++winIt) {
+                if (winIt->processName == processName) {
+                    it = winIt;
+                    break;
+                }
+            }
+            if (it != windows.end()) {
+                HICON hIcon = ExtractIconW(hInstance, it->exePath.c_str(), 0);
+                if (hIcon == NULL) {
+                    hIcon = hIcon1;
+                }
+                processIcons[processName] = hIcon;
             }
         }
-        break;
 
+        // Additional actions if needed
+        RefreshWindowList(hwnd); 
+        ShowWindow(hwnd, SW_RESTORE); 
+        SaveCurrentWindows(); 
+        AdjustWindowSize(hwnd); 
+        SetForegroundWindow(hwnd); 
+    } else if (lParam == WM_RBUTTONUP) { 
+        ShowTrayMenu(hwnd); 
+    }
+}
+break;
         default: { // Default message
             return DefWindowProc(hwnd, uMsg, wParam, lParam); // Call the default window procedure
         }
