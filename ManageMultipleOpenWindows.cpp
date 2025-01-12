@@ -611,7 +611,7 @@ void AdjustWindowSize(HWND hwnd) {
     GetScrollInfo(hwnd, SB_VERT, &si); // Retrieve the scroll information of the window
     int screenHeight = GetSystemMetrics(SM_CYSCREEN); // Retrieve the screen height
     int titleBarHeight = GetSystemMetrics(SM_CYCAPTION); // Retrieve the title bar height
-    int usableScreenHeight = screenHeight - titleBarHeight - 25; // Calculate the usable screen height
+    int usableScreenHeight = screenHeight - titleBarHeight - 25 - 50; // Calculate the usable screen height (minus 50px to not be straigt up to the bottom of the screen)
     int contentHeight = si.nMax + 30 + 40; //Calculate the content height
     int contentWidth = 700; // Set the content width
     int newHeight = std::min(contentHeight, usableScreenHeight); // Calculate the new window height
@@ -1212,7 +1212,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
             for (size_t i = 0; i < processNames.size(); ++i) {
                 const auto& processName = processNames[i];
-                std::wstring text = L"       " + std::wstring(checkboxState[processName] ? L"\u2611 " : L"\u2610 ") + std::wstring(processName.begin(), processName.end());
+                auto& windows = processWindowsMap[processName];
+                std::wstring text = L"       " + std::wstring(checkboxState[processName] ? L"\u2611 " : L"\u2610 ") + std::wstring(processName.begin(), processName.end()) + L" (" + std::to_wstring(windows.size()) + L")";
                 RECT rect = { 30, yPos, textWidth, yPos + 30 };
                 SetTextColor(hdcMem, RGB(0, 0, 0));
                 DrawTextW(hdcMem, text.c_str(), -1, &rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
