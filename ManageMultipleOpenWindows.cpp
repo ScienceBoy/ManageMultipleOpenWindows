@@ -1,3 +1,5 @@
+#define UNICODE
+#define _UNICODE
 #include <windows.h> // Include Windows API functions
 #include <psapi.h> // Include functions for process management
 #include <vector> // Include STL vector library
@@ -23,6 +25,8 @@
 #define ID_ARRANGE  2003 // Needs 2003-200x for enumerate all screens
 #define ID_MAXIMIZE 2050
 #define ID_MOVE_TO_SCREEN_BASE 2104
+#define IDC_SEARCHBOX 101
+
 
 // Structure to store window information
 struct WindowInfo {
@@ -32,6 +36,7 @@ struct WindowInfo {
     std::wstring exePath;
     bool checked; // Status indicating if the window is selected
     bool arranged; 
+    bool visible; 
 };
 
 struct MonitorInfo {
@@ -77,6 +82,7 @@ static POINT lastMousePos = {0, 0}; // Variable to store the last mouse position
 static std::map<std::wstring, HICON> processIcons; // Map for prozess icons
 int screenCount = 1;
 HWND hwndTT;
+HWND hSearchBox;
 
 // Callback function to list open windows
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
@@ -308,6 +314,12 @@ void CreateMoveToScreenMenu(HMENU hMenu) {
     AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hMoveToScreenMenu, L"Mo&ve Window(s)");
 }
 
+std::wstring toLower(const std::wstring& str) {
+    std::wstring lowerStr = str;
+    std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::towlower);
+    return lowerStr;
+}
+
 void CreateArrangeOnScreenMenu(HMENU hMenu) {
     HMENU hArrangeOnScreenMenu = CreateMenu();
     std::vector<MonitorInfo> monitors;
@@ -403,6 +415,12 @@ bool caseInsensitiveCompare(const std::wstring& a, const std::wstring& b) {
     std::transform(lowerA.begin(), lowerA.end(), lowerA.begin(), ::towlower);
     std::transform(lowerB.begin(), lowerB.end(), lowerB.begin(), ::towlower);
     return lowerA < lowerB;
+}
+
+void SetEditPlaceholder(HWND hwndEdit, const std::wstring& placeholder) {
+    SetWindowText(hwndEdit, placeholder.c_str());
+    SendMessage(hwndEdit, EM_SETSEL, 0, -1); // Markiere den gesamten Text
+    SendMessage(hwndEdit, EM_SETSEL, -1, -1); // Entferne die Markierung
 }
 
 // Function to allow on-mouse-over tooltip
@@ -645,6 +663,62 @@ bool ConfirmClose(HWND hwnd) {
     return (result == IDYES); // Return whether the user chose "Yes"
 }
 
+void SearchAndCheck(const std::wstring& searchString, HWND hwnd) {
+    std::wstring lowerSearchString = toLower(searchString);
+
+    // Setze alle Checkboxen auf "unchecked" und klappe alle Prozesse zu
+    for (auto& processName : processNames) {
+        checkboxState[processName] = false;
+        expandedState[processName] = false; // Klappe alle Prozesse zu
+        for (auto& window : processWindowsMap[processName]) {
+            window.checked = false;
+            window.visible = false; // Setze das sichtbare Attribut auf false
+        }
+    }
+
+    // Führe die Suche durch und setze passende Einträge auf "checked"
+    if (!lowerSearchString.empty()) {
+        for (auto& processName : processNames) {
+            std::wstring lowerProcessName = toLower(processName);
+            bool processMatch = lowerProcessName.find(lowerSearchString) != std::wstring::npos;
+            if (processMatch) {
+                checkboxState[processName] = true;
+            }
+
+            for (auto& window : processWindowsMap[processName]) {
+                std::wstring lowerWindowTitle = toLower(window.title);
+                bool windowMatch = lowerWindowTitle.find(lowerSearchString) != std::wstring::npos;
+                if (windowMatch) {
+                    window.checked = true;
+                    window.visible = true; // Setze das sichtbare Attribut auf true, wenn es übereinstimmt
+                    expandedState[processName] = true; // Klappe den Prozess auf, wenn ein Fenster übereinstimmt
+                }
+            }
+        }
+    }
+
+    // Scroll-Informationen aktualisieren
+    SCROLLINFO si = {}; // Initialize a SCROLLINFO structure
+    si.cbSize = sizeof(si); // Set the size of the SCROLLINFO structure
+    si.fMask = SIF_RANGE | SIF_PAGE; // Specify the masks to use
+    si.nMin = 0; // Set the minimum scroll range
+    si.nMax = 0; // Initialize the maximum scroll range
+    for (const auto& processName : processNames) { // Iterate through all process names
+        si.nMax += 30; // Increment the maximum scroll range for each process
+        if (expandedState[processName]) { // Check if the process is expanded
+            for (const auto& window : processWindowsMap[processName]) {
+                if (window.visible) {
+                    si.nMax += 30; // Increment the maximum scroll range based on the number of visible windows
+                }
+            }
+        }
+    }
+    si.nPage = 10; // Set the page length for scrolling
+    SetScrollInfo(hwnd, SB_VERT, &si, TRUE); // Set the scroll information for the vertical scrollbar
+    InvalidateRect(hwnd, NULL, TRUE); // Invalidate and redraw the window
+    AdjustWindowSize(hwnd); // Adjust the window size
+}
+
 // Window procedure
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     static int scrollPos = 0; // Static variable to store the scroll position
@@ -661,16 +735,25 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 initialized = true;
                 MinimizeToTray(hwnd);
             }
-            hwndTT = CreateTooltip(hwnd);
-
+            RECT clientRect;
+            GetClientRect(hwnd, &clientRect);
+            int searchBoxWidth = 100; // Breite des Suchfelds
+            int searchBoxHeight = 20; // Höhe des Suchfelds
+            int searchBoxX = clientRect.right - searchBoxWidth - 10; // Position X des Suchfelds
+            int searchBoxY = 10; // Position Y des Suchfelds
+    hSearchBox = CreateWindowEx(0, TEXT("EDIT"), NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 
+                                searchBoxX, searchBoxY, searchBoxWidth, searchBoxHeight, hwnd, (HMENU)IDC_SEARCHBOX, 
+                                ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+    SendMessage(hSearchBox, EM_SETLIMITTEXT, 10, 0); // Begrenze die Eingabe auf 10 Zeichen
+    SetEditPlaceholder(hSearchBox, L"Search name"); // Setze den Hint
             HMENU hMenu = CreateMenu();
 
-            AppendMenu(hMenu, MF_STRING, ID_MINIMIZE, "&Minimize Window(s)");
-            AppendMenu(hMenu, MF_STRING, ID_MAXIMIZE, "Ma&ximize Window(s)");        
-            AppendMenu(hMenu, MF_STRING, ID_RESTORE, "&Restore Window(s)");
+            AppendMenu(hMenu, MF_STRING, ID_MINIMIZE, L"&Minimize Window(s)");
+            AppendMenu(hMenu, MF_STRING, ID_MAXIMIZE, L"Ma&ximize Window(s)");
+            AppendMenu(hMenu, MF_STRING, ID_RESTORE, L"&Restore Window(s)");
+            AppendMenu(hMenu, MF_STRING, ID_CLOSE, L"&Close Window(s)");
             CreateArrangeOnScreenMenu(hMenu); // Arrange
             CreateMoveToScreenMenu(hMenu); // Move
-            AppendMenu(hMenu, MF_STRING, ID_CLOSE, "&Close Window(s)");
 
             SetMenu(hwnd, hMenu);
 
@@ -787,7 +870,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             id = LOWORD(wParam); // Extract the command ID from wParam
             //std::wstring message = L"" + std::to_wstring(id);
             //MessageBoxW(hwnd, message.c_str(), L"Debug Info", MB_OK);
-
+            if (HIWORD(wParam) == EN_CHANGE && LOWORD(wParam) == IDC_SEARCHBOX) {
+                wchar_t searchString[256];
+                GetWindowTextW(hSearchBox, searchString, 256);
+                SearchAndCheck(searchString , hwnd);
+            }
             // Check if the command ID is one of the specified IDs
             if (id == ID_MINIMIZE || id == ID_MAXIMIZE || id == ID_RESTORE || id == ID_CLOSE || 
                 (id >= ID_ARRANGE && id <= ID_ARRANGE + screenCount) || 
@@ -1021,12 +1108,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 ProcessMessages(); // Process messages
                 Sleep(100); // Short pause
                 MinimizeToTray(hwnd); // Minimize the window to the tray
-            } else if (id >= 3000 && id < 3000 + processNames.size()) { // Check if the ID is within the range of process names
+            } else if (id >= 3000 && id < 3000 + processNames.size()) { // Check if the ID is within the range of process names and thus collapse/expand needed
                 //MessageBoxW(hwnd, L"aha3", L"Debug Info", MB_OK);
                 std::wstring processName = processNames[id - 3000]; // Retrieve the process name based on the ID
-                checkboxState[processName] = !checkboxState[processName]; // Toggle the checkbox state for the process
+                //checkboxState[processName] = !checkboxState[processName]; // Toggle the checkbox state for the process
                 for (auto& window : processWindowsMap[processName]) { // Iterate through all windows of the process
-                    window.checked = checkboxState[processName]; // Set the checkbox state for each window of the process
+                    //window.checked = checkboxState[processName];  Set the checkbox state for each window of the process
                 }
                 expandedState[processName] = !expandedState[processName]; // Toggle the expanded state for the process
                 SCROLLINFO si = {}; // Initialize a SCROLLINFO structure
@@ -1044,6 +1131,22 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 SetScrollInfo(hwnd, SB_VERT, &si, TRUE); // Set the scroll information for the vertical scrollbar
                 InvalidateRect(hwnd, NULL, TRUE); // Invalidate and redraw the window
                 AdjustWindowSize(hwnd); // Adjust the window size
+            } else if (HIWORD(wParam) == EN_SETFOCUS && LOWORD(wParam) == IDC_SEARCHBOX) {
+                wchar_t text[256];
+                GetWindowText(hSearchBox, text, 256);
+                if (wcscmp(text, L"Search name") == 0) {
+                    SetWindowText(hSearchBox, L"");
+                }
+            } else if (HIWORD(wParam) == EN_KILLFOCUS && LOWORD(wParam) == IDC_SEARCHBOX) {
+                wchar_t text[256];
+                GetWindowText(hSearchBox, text, 256);
+                if (wcslen(text) == 0) {
+                    SetEditPlaceholder(hSearchBox, L"Search name");
+                }
+            } else if (HIWORD(wParam) == EN_CHANGE && LOWORD(wParam) == IDC_SEARCHBOX) {
+                wchar_t searchString[256];
+                GetWindowTextW(hSearchBox, searchString, 256);
+                SearchAndCheck(searchString, hwnd);
             }
             }
             break;
@@ -1186,61 +1289,64 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         break;
         
-        case WM_PAINT: {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hwnd, &ps);
+case WM_PAINT: {
+    PAINTSTRUCT ps;
+    HDC hdc = BeginPaint(hwnd, &ps);
 
-            // Erstelle einen Offscreen-Puffer
-            HDC hdcMem = CreateCompatibleDC(hdc);
-            RECT clientRect;
-            GetClientRect(hwnd, &clientRect);
-            HBITMAP hbmMem = CreateCompatibleBitmap(hdc, clientRect.right, clientRect.bottom);
-            HBITMAP hbmOld = (HBITMAP)SelectObject(hdcMem, hbmMem);
+    // Erstelle einen Offscreen-Puffer
+    HDC hdcMem = CreateCompatibleDC(hdc);
+    RECT clientRect;
+    GetClientRect(hwnd, &clientRect);
+    HBITMAP hbmMem = CreateCompatibleBitmap(hdc, clientRect.right, clientRect.bottom);
+    HBITMAP hbmOld = (HBITMAP)SelectObject(hdcMem, hbmMem);
 
-            // Hintergrund des Offscreen-Puffers füllen
-            HBRUSH hBrush = CreateSolidBrush(RGB(255, 255, 255)); // Weißer Hintergrund
-            FillRect(hdcMem, &clientRect, hBrush);
-            DeleteObject(hBrush);
+    // Hintergrund des Offscreen-Puffers füllen
+    HBRUSH hBrush = CreateSolidBrush(RGB(255, 255, 255)); // Weißer Hintergrund
+    FillRect(hdcMem, &clientRect, hBrush);
+    DeleteObject(hBrush);
 
-            // Zeichne das UI im Offscreen-Puffer
-            int yPos = 0 - scrollPos;
-            HFONT hFont = CreateFont(24, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, TEXT("Segoe UI Symbol"));
-            HFONT hOldFont = (HFONT)SelectObject(hdcMem, hFont);
+    // Zeichne das UI im Offscreen-Puffer
+    int searchBoxHeight = 10; // Höhe des Suchfelds
+    int yPos = searchBoxHeight - scrollPos; // Platz für das Suchfeld und etwas Abstand
+    HFONT hFont = CreateFont(24, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, TEXT("Segoe UI Symbol"));
+    HFONT hOldFont = (HFONT)SelectObject(hdcMem, hFont);
 
-            int scrollbarWidth = GetSystemMetrics(SM_CXVSCROLL);
-            int textWidth = clientRect.right - scrollbarWidth - 30;
+    int scrollbarWidth = GetSystemMetrics(SM_CXVSCROLL);
+    int textWidth = clientRect.right - scrollbarWidth - 30;
 
-            for (size_t i = 0; i < processNames.size(); ++i) {
-                const auto& processName = processNames[i];
-                auto& windows = processWindowsMap[processName];
-                std::wstring text = L"       " + std::wstring(checkboxState[processName] ? L"\u2611 " : L"\u2610 ") + std::wstring(processName.begin(), processName.end()) + L" (" + std::to_wstring(windows.size()) + L")";
-                RECT rect = { 30, yPos, textWidth, yPos + 30 };
-                SetTextColor(hdcMem, RGB(0, 0, 0));
-                DrawTextW(hdcMem, text.c_str(), -1, &rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    for (size_t i = 0; i < processNames.size(); ++i) {
+        const auto& processName = processNames[i];
+        auto& windows = processWindowsMap[processName];
+        std::wstring text = L"       " + std::wstring(checkboxState[processName] ? L"\u2611 " : L"\u2610 ") + std::wstring(processName.begin(), processName.end()) + L" (" + std::to_wstring(windows.size()) + L")";
+        RECT rect = { 30, yPos, textWidth, yPos + 30 };
+        SetTextColor(hdcMem, RGB(0, 0, 0));
+        DrawTextW(hdcMem, text.c_str(), -1, &rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-                // Icon des Prozesses zeichnen
-                DrawIconEx(hdcMem, rect.left + 10, yPos + 5, processIcons[processName], 20, 20, 0, NULL, DI_NORMAL);
+        // Icon des Prozesses zeichnen
+        DrawIconEx(hdcMem, rect.left + 10, yPos + 5, processIcons[processName], 20, 20, 0, NULL, DI_NORMAL);
 
-                SetWindowPos(expandButtons[processName], HWND_TOPMOST, 10, yPos, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
-                yPos += 30;
-                if (expandedState[processName]) {
-                    // Fenster-Namen sortieren
-                    auto& windows = processWindowsMap[processName];
-                    std::sort(windows.begin(), windows.end(), compareWindowsByName);
+        SetWindowPos(expandButtons[processName], HWND_TOPMOST, 10, yPos, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
+        yPos += 30;
+        if (expandedState[processName]) {
+            // Fenster-Namen sortieren
+            auto& windows = processWindowsMap[processName];
+            std::sort(windows.begin(), windows.end(), compareWindowsByName);
 
-                    for (size_t j = 0; j < windows.size(); ++j) {
-                        const auto& window = windows[j];
-                        std::wstring windowText = L"       " + std::wstring(window.checked ? L"\u2611 " : L"\u2610 ") + std::wstring(window.title.begin(), window.title.end());
-                        RECT windowRect = { 50, yPos, textWidth, yPos + 30 };
-                        SetTextColor(hdcMem, RGB(0, 0, 255));
-                        DrawTextW(hdcMem, windowText.c_str(), -1, &windowRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            for (size_t j = 0; j < windows.size(); ++j) {
+                const auto& window = windows[j];
+                if (window.visible) {
+                    std::wstring windowText = L"       " + std::wstring(window.checked ? L"\u2611 " : L"\u2610 ") + std::wstring(window.title.begin(), window.title.end());
+                    RECT windowRect = { 50, yPos, textWidth, yPos + 30 };
+                    SetTextColor(hdcMem, RGB(0, 0, 255));
+                    DrawTextW(hdcMem, windowText.c_str(), -1, &windowRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-                        DrawIconEx(hdcMem, windowRect.left + 10, yPos + 7, processIcons[processName], 16, 16, 0, NULL, DI_NORMAL);
+                    DrawIconEx(hdcMem, windowRect.left + 10, yPos + 7, processIcons[processName], 16, 16, 0, NULL, DI_NORMAL);
 
-                        yPos += 30;
-                    }
+                    yPos += 30;
                 }
             }
+        }
+    }
             //yPos += 30;
             //yPos += 30;
             SelectObject(hdcMem, hOldFont);
@@ -1306,12 +1412,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         hwndTT = CreateTooltip(hwnd);
 
         HMENU hMenu = CreateMenu();
-        AppendMenu(hMenu, MF_STRING, ID_MINIMIZE, "&Minimize Window(s)");
-        AppendMenu(hMenu, MF_STRING, ID_MAXIMIZE, "Ma&ximize Window(s)");        
-        AppendMenu(hMenu, MF_STRING, ID_RESTORE, "&Restore Window(s)");
+        AppendMenu(hMenu, MF_STRING, ID_MINIMIZE, L"&Minimize Window(s)");
+        AppendMenu(hMenu, MF_STRING, ID_MAXIMIZE, L"Ma&ximize Window(s)");        
+        AppendMenu(hMenu, MF_STRING, ID_RESTORE, L"&Restore Window(s)");
         CreateArrangeOnScreenMenu(hMenu);
         CreateMoveToScreenMenu(hMenu);
-        AppendMenu(hMenu, MF_STRING, ID_CLOSE, "&Close Window(s)");
+        AppendMenu(hMenu, MF_STRING, ID_CLOSE, L"&Close Window(s)");
         SetMenu(hwnd, hMenu);
 
         SCROLLINFO si = {};
@@ -1349,6 +1455,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         ShowWindow(hwnd, SW_RESTORE); 
         SaveCurrentWindows(); 
         AdjustWindowSize(hwnd); 
+        //Sleep(150);
         SetForegroundWindow(hwnd); 
     } else if (lParam == WM_RBUTTONUP) { 
         ShowTrayMenu(hwnd); 
@@ -1366,9 +1473,9 @@ break;
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     // Main function for Windows applications
 
-    const char CLASS_NAME[] = "SampleWindowClass"; // Define the class name for the window
+    const wchar_t CLASS_NAME[] = L"SampleWindowClass"; // Define the class name for the window
 
-    WNDCLASSA wc = {}; // Initialize a WNDCLASSA structure
+    WNDCLASSW wc = { }; // Initialize a WNDCLASSA structure
     wc.lpfnWndProc = WindowProc; // Set the window procedure
     wc.hInstance = hInstance; // Set the instance handle
     wc.lpszClassName = CLASS_NAME; // Set the class name
@@ -1376,19 +1483,19 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     wc.hbrBackground = CreateSolidBrush(RGB(255, 255, 255)); // Create a white background brush
     wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MYICON)); // Load the window icon
 
-    RegisterClassA(&wc); // Register the window class
+    RegisterClassW(&wc); // Register the window class
 
-    HWND hwnd = CreateWindowExA(
-        0, // Extended window style
-        CLASS_NAME, // Name of the window class
-        "Manage Multiple Open Windows", // Window title
-        WS_OVERLAPPED | WS_SYSMENU | WS_VSCROLL | WS_EX_COMPOSITED, // Window style
-        CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, // Position and size of the window
-        NULL, // No parent window
-        NULL, // No menu
-        hInstance, // Instance handle
-        NULL // No additional parameters
-    );
+HWND hwnd = CreateWindowExW(
+    0, // Extended window style
+    CLASS_NAME, // Name of the window class
+    L"Manage Multiple Open Windows", // Window title
+    WS_OVERLAPPED | WS_SYSMENU | WS_VSCROLL | WS_EX_COMPOSITED, // Window style
+    CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, // Position and size of the window
+    NULL, // No parent window
+    NULL, // No menu
+    hInstance, // Instance handle
+    NULL // No additional parameters
+);
 
     if (hwnd == NULL) {
         return 0; // Return 0 if the window could not be created
