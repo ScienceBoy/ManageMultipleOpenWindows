@@ -89,6 +89,9 @@ int highlightedWindowRow = -1; // Globale Variable zur Speicherung der hervorgeh
 bool isRedrawPending = false;
 int screenCount = 1;
 int textWidth = 700;
+static int defaultYPos = -1;
+static int defaultXPos = 0;
+
 HWND hwndTT;
 HWND hSearchBox;
 HWND hEraseButton;
@@ -227,6 +230,23 @@ BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMoni
     return TRUE;
 }
 
+bool IsValidInput(const wchar_t* input) {
+    while (*input) {
+        if (!iswalnum(*input) && // Alphanumerische Zeichen
+            *input != L'\\' && *input != L'/' && // Backslash und Forwardslash
+            *input != L'*' && *input != L'-' && *input != L'+' && *input != L'=' && *input != L'!' &&
+            *input != L'{' && *input != L'}' && *input != L'&' && *input != L'%' && *input != L'#' &&
+            *input != L'@' && *input != L'(' && *input != L')' && *input != L'^' && *input != L'~' &&
+            *input != L'é' && *input != L'è' && *input != L'à' && *input != L'$' && *input != L'£' &&
+            *input != L'.' && *input != L'<' && *input != L'>' &&
+            *input != L'ä' && *input != L'ö' && *input != L'ü' && *input != L'ß') { // Umlaute
+            return false;
+        }
+        input++;
+    }
+    return true;
+}
+
 void MoveWindowToScreen(HWND hwnd, int screenIndex) {
     if (!IsWindow(hwnd)) {
         //MessageBox(NULL, "Ungueltiges Fenster-Handle", "Fehler", MB_OK | MB_ICONERROR);
@@ -307,19 +327,29 @@ void CreateMoveToScreenMenu(HMENU hMenu) {
     HMENU hMoveToScreenMenu = CreateMenu();
     std::vector<MonitorInfo> monitors;
     EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, reinterpret_cast<LPARAM>(&monitors));
+
+    // Sortiere die Monitore nach ihrer linken Koordinate
+    std::sort(monitors.begin(), monitors.end(), CompareMonitors);
+
     if (monitors.size() > 1) { // Check if more than one screen is present
         screenCount = -1;
         for (const auto& monitor : monitors) {
             screenCount++;
             int width = monitor.rect.right - monitor.rect.left;
             int height = monitor.rect.bottom - monitor.rect.top;
-            std::wstring menuText = L"Screen " + std::to_wstring(monitor.index) + L" (" + 
+            std::wstring menuText = L"Screen " + std::to_wstring(screenCount + 1) + L" (" + 
                                     std::to_wstring(width) + L"x" + 
                                     std::to_wstring(height) + L")";
 
-            // Berechne das neue Seitenverhältnis mit fester Höhe von 25 Pixel
-            int newHeight = 25;
-            int newWidth = static_cast<int>(25.0 * width / height);
+            // Berechne das neue Seitenverhältnis
+            int newWidth, newHeight;
+            if (width > height) {
+                newWidth = 25;
+                newHeight = static_cast<int>(35.0 * height / width);
+            } else {
+                newHeight = 25;
+                newWidth = static_cast<int>(35.0 * width / height);
+            }
 
             HBITMAP hBitmap = CaptureAndResizeScreen(NULL, monitor.rect, newWidth, newHeight);
             AddMenuItemWithImage(hMoveToScreenMenu, ID_MOVE_TO_SCREEN_BASE + monitor.index, hBitmap, menuText);
@@ -348,15 +378,16 @@ std::wstring capitalizeIfAllCaps(const std::wstring& str) {
             break;
         }
     }
+    std::wstring result = str;
     if (allCaps) {
-        std::wstring result = str;
         for (wchar_t& c : result) {
             c = std::towlower(c);
         }
         result[0] = std::towupper(result[0]);
         return result;
     }
-    return str;
+    result[0] = std::towupper(result[0]);
+    return result;
 }
 
 std::wstring toLower(const std::wstring& str) {
@@ -364,9 +395,38 @@ std::wstring toLower(const std::wstring& str) {
     std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::towlower);
     return lowerStr;
 }
+
+void ShowTooltip(HWND hwnd, const wchar_t* message) {
+    TOOLINFO ti = { 0 };
+    ti.cbSize = sizeof(TOOLINFO);
+    ti.uFlags = TTF_SUBCLASS | TTF_CENTERTIP;
+    ti.hwnd = hwnd;
+    ti.hinst = GetModuleHandle(NULL);
+    ti.lpszText = (LPWSTR)message;
+
+    RECT rect;
+    GetClientRect(hwnd, &rect);
+    ti.rect = rect;
+
+    HWND hwndTT = CreateWindowEx(WS_EX_TOPMOST, TOOLTIPS_CLASS, NULL,
+        WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP, CW_USEDEFAULT, CW_USEDEFAULT,
+        CW_USEDEFAULT, CW_USEDEFAULT, hwnd, NULL, GetModuleHandle(NULL), NULL);
+
+    SendMessage(hwndTT, TTM_ADDTOOL, 0, (LPARAM)&ti);
+    SendMessage(hwndTT, TTM_SETMAXTIPWIDTH, 0, 300);
+    SendMessage(hwndTT, TTM_TRACKPOSITION, 0, (LPARAM)MAKELONG(rect.left + 10, rect.top + 10));
+    SendMessage(hwndTT, TTM_TRACKACTIVATE, TRUE, (LPARAM)&ti);
+
+    // Timer to hide the tooltip after a few seconds
+    SetTimer(hwnd, 2, 3000, NULL); // 3 seconds
+}
+
 void CreateArrangeOnScreenMenu(HMENU hMenu) {
     std::vector<MonitorInfo> monitors;
     EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, reinterpret_cast<LPARAM>(&monitors));
+
+    // Sortiere die Monitore nach ihrer linken Koordinate
+    std::sort(monitors.begin(), monitors.end(), CompareMonitors);
 
     HMENU hArrangeOnScreenMenu = CreateMenu();
     if (monitors.size() > 1) { // Check if more than one screen is present
@@ -376,7 +436,7 @@ void CreateArrangeOnScreenMenu(HMENU hMenu) {
             screenCount++;
             int width = monitor.rect.right - monitor.rect.left;
             int height = monitor.rect.bottom - monitor.rect.top;
-            std::wstring menuText = L"Screen " + std::to_wstring(monitor.index) + L" (" + 
+            std::wstring menuText = L"Screen " + std::to_wstring(screenCount + 1) + L" (" + 
                                     std::to_wstring(width) + L"x" + 
                                     std::to_wstring(height) + L")";
 
@@ -384,10 +444,10 @@ void CreateArrangeOnScreenMenu(HMENU hMenu) {
             int newWidth, newHeight;
             if (width > height) {
                 newWidth = 25;
-                newHeight = static_cast<int>(30.0 * height / width);
+                newHeight = static_cast<int>(35.0 * height / width);
             } else {
                 newHeight = 25;
-                newWidth = static_cast<int>(30.0 * width / height);
+                newWidth = static_cast<int>(35.0 * width / height);
             }
 
             HBITMAP hBitmap = CaptureAndResizeScreen(NULL, monitor.rect, newWidth, newHeight);
@@ -686,12 +746,26 @@ void AdjustWindowSize(HWND hwnd) {
 
     // Calculate the new y-position
     int newYPos = yPos - (newHeight - height);
-    if (newYPos < 0) {
-        newYPos = 0; // Ensure the window is not moved above the top of the screen
-        newHeight = screenHeight - titleBarHeight - 25 - 50; // Adjust the height to fit the screen
+
+    // Überprüfen Sie, ob das Fenster am unteren Rand des Bildschirms abgeschnitten wird
+    if (newYPos + newHeight > screenHeight) {
+        newYPos = screenHeight - newHeight; // Verschieben Sie das Fenster nach oben, um es auf den Bildschirm zu passen
+        if (newYPos < 0) {
+            newYPos = 0; // Stellen Sie sicher, dass das Fenster nicht über den oberen Rand des Bildschirms hinaus verschoben wird
+            newHeight = screenHeight - titleBarHeight - 25 - 50; // Passen Sie die Höhe an, um auf den Bildschirm zu passen
+        }
+        // Speichern Sie die neue Y-Koordinate als Standard
+        defaultYPos = newYPos;
     }
 
-    SetWindowPos(hwnd, NULL, xPos, newYPos, contentWidth, newHeight, SWP_NOZORDER); // Set the new window position and size
+    // Verwenden Sie die Standard-Y-Koordinate, wenn sie gesetzt ist
+    if (defaultYPos != -1) {
+        newYPos = defaultYPos;
+    } else {
+        newYPos = yPos; // Verwenden Sie die ursprüngliche Y-Koordinate, wenn keine Standard-Y-Koordinate gesetzt ist
+    }
+
+    SetWindowPos(hwnd, NULL, xPos, newYPos, contentWidth, newHeight, SWP_NOZORDER); // Setzen Sie die neue Fensterposition und -größe
 }
 
 void InitializeMenu(HWND hwnd) {
@@ -874,20 +948,31 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             GetClientRect(hwnd, &clientRect);
             int searchBoxWidth = 150; // Breite des Suchfelds
             int searchBoxHeight = 20; // Höhe des Suchfelds
-            int searchBoxX = clientRect.right - searchBoxWidth - 30; // Position X des Suchfelds
+            int searchBoxX = clientRect.right - searchBoxWidth - 40; // Position X des Suchfelds
             int searchBoxY = 5; // Position Y des Suchfelds
 
             // Erstellen Sie das Suchfeld
             hSearchBox = CreateWindowEx(0, TEXT("EDIT"), NULL, WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 
                                         searchBoxX, searchBoxY, searchBoxWidth, searchBoxHeight, hwnd, (HMENU)IDC_SEARCHBOX, 
                                         ((LPCREATESTRUCT)lParam)->hInstance, NULL);
-            SendMessage(hSearchBox, EM_SETLIMITTEXT, 10, 0); // Begrenze die Eingabe auf 10 Zeichen
-            SetEditPlaceholder(hSearchBox, L"Search name"); // Setze den Hint
+            SendMessage(hSearchBox, EM_SETLIMITTEXT, 32, 0); // Begrenze die Eingabe auf 32 Zeichen
+            SetEditPlaceholder(hSearchBox, L"Search name (CTRL-F)"); // Setze den Hint
 
             // Erstellen Sie den "Erase"-Button
             hEraseButton = CreateWindowEx(0, TEXT("BUTTON"), TEXT("X"), WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 
-                                            searchBoxX + searchBoxWidth, searchBoxY, 20, searchBoxHeight, hwnd, (HMENU)IDC_ERASEBUTTON, 
-                                            ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+                                        searchBoxX + searchBoxWidth, searchBoxY, 20, searchBoxHeight, hwnd, (HMENU)IDC_ERASEBUTTON, 
+                                        ((LPCREATESTRUCT)lParam)->hInstance, NULL);
+
+            // Erstellen Sie die Schriftart "Segoe UI"
+            HFONT hFont = CreateFont(
+                16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, TEXT("Segoe UI")
+            );
+
+            // Wenden Sie die Schriftart auf die Steuerelemente an
+            SendMessage(hSearchBox, WM_SETFONT, (WPARAM)hFont, TRUE);
+            SendMessage(hEraseButton, WM_SETFONT, (WPARAM)hFont, TRUE);
 
             InitializeMenu(hwnd);
             /*HMENU hMenu = CreateMenu();
@@ -935,12 +1020,29 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         //InvalidateWindow(hwnd);
         break;
 
-        case WM_TIMER: {
+        case WM_KEYDOWN:
+            if ((wParam == 'F') && (GetKeyState(VK_CONTROL) & 0x8000)) {
+                // Ctrl+F wurde gedrückt
+                SetFocus(hSearchBox);
+                SendMessage(hSearchBox, EM_SETSEL, 0, -1); // Markieren Sie den gesamten Text im Suchfeld
+                return 0;
+            /*} else if (wParam == VK_ESCAPE) {
+                // ESC-Taste wurde gedrückt
+                wParam = IDC_ERASEBUTTON;*/
+            }
+        break;
+
+        case WM_TIMER: 
             if (wParam == 1) {
                 DestroyWindow(hwnd);
+            } /*else if (wParam == 2) {
+            KillTimer(hwnd, 2);
+            HWND hwndTT = FindWindowEx(NULL, NULL, TOOLTIPS_CLASS, NULL);
+            if (hwndTT) {
+                SendMessage(hwndTT, TTM_TRACKACTIVATE, FALSE, 0);
+                DestroyWindow(hwndTT);
             }
-        }
-        //InvalidateWindow(hwnd);
+        }*/
         break;
 
         case WM_DRAWITEM: { // Message when drawing an item
@@ -1034,21 +1136,35 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 SetWindowText(hSearchBox, L"");
                 ShowWindow(hEraseButton, SW_SHOW); 
                 SearchAndCheckErase(hwnd);
+                SendMessage(hwnd, WM_VSCROLL, MAKEWPARAM(SB_THUMBPOSITION, 1), 0);                 // Setzen Sie die Scrollposition auf 1                
                 InvalidateRect(hEraseButton, NULL, TRUE);
                 UpdateWindow(hEraseButton);
-                //InvalidateWindow(hwnd);                               
+                if (GetWindowTextLength(hSearchBox) == 0) {
+                    SetWindowText(hSearchBox, L"Search name (CTRL-F)"); // Setzen Sie hier Ihren Such-Hint-Text ein
+                }
+                SetFocus(hwnd);
             }
             if (HIWORD(wParam) == EN_CHANGE && LOWORD(wParam) == IDC_SEARCHBOX) {
                 wchar_t searchString[256];
                 GetWindowTextW(hSearchBox, searchString, 256);
-                SearchAndCheck(searchString, hwnd);
+                if (IsValidInput(searchString)) {
+                    SearchAndCheck(searchString, hwnd);
+                } else {
+                    //ShowTooltip(hSearchBox, L"Invalid input. Please use only allowed characters.");                    SetFocus(hSearchBox); // Setzen Sie den Fokus wieder auf das Suchfeld
+                }
+                SendMessage(hwnd, WM_VSCROLL, MAKEWPARAM(SB_THUMBPOSITION, 1), 0);                 // Setzen Sie die Scrollposition auf 1
                 //InvalidateWindow(hwnd);
             }
             if (HIWORD(wParam) == EN_UPDATE && LOWORD(wParam) == IDC_SEARCHBOX) {
                 if (GetKeyState(VK_RETURN) & 0x8000) {
                     wchar_t searchString[256];
                     GetWindowTextW(hSearchBox, searchString, 256);
-                    SearchAndCheck(searchString, hwnd);
+                    if (IsValidInput(searchString)) {
+                        SearchAndCheck(searchString, hwnd);
+                    } else {
+                        //ShowTooltip(hSearchBox, L"Invalid input. Please use only allowed characters.");                        SetFocus(hSearchBox); // Setzen Sie den Fokus wieder auf das Suchfeld
+                    }
+                    SendMessage(hwnd, WM_VSCROLL, MAKEWPARAM(SB_THUMBPOSITION, 1), 0);                 // Setzen Sie die Scrollposition auf 1                    
                     //InvalidateWindow(hwnd);
                 }
             }
@@ -1225,26 +1341,71 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 int cols = static_cast<int>(ceil(sqrt(numWindows))); // Calculate the number of columns
                 int rows = (numWindows + cols - 1) / cols; // Calculate the number of rows
 
-                int windowWidth = screenWidth / cols; // Calculate the window width
-                int windowHeight = screenHeight / rows; // Calculate the window height
+                int windowWidth = (screenWidth) / cols; // Calculate the window width
+                int windowHeight = (screenHeight - 50) / rows; // Calculate the window height
 
                 int x = 0, y = 0; // Initialize the X and Y positions
+                int maxAdjustedWidth = 0;
+                numWindows = 0;
+
+                // Zuerst die Breite des breitesten Fensters ermitteln
                 for (const auto& entry : processWindowsMap) { // Iterate through all processes
                     for (const auto& window : entry.second) { // Iterate through all windows of a process
                         if (window.checked) { // Check if the window is selected
                             ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
                             SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
                             MoveWindowToScreen(window.hwnd, screenIndex);
-			                //MoveWindowToMainMonitor(window.hwnd); // Move the window to the main monitor
                             ProcessMessages(); // Process messages
                             ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
                             ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
                             SetForegroundWindow(window.hwnd); // Bring the window to the foreground
-                            //SetWindowPos(window.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE); // Ensure the window is brought to the top of the Z-order
                             ProcessMessages(); // Process messages
-                            //Sleep(150); // Short pause
                             MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth, windowHeight, TRUE); // Move and resize the window
                             ProcessMessages(); // Process messages
+
+                            // Größe des klienten Bereichs ermitteln
+                            RECT clientRect;
+                            GetClientRect(window.hwnd, &clientRect);
+                            int clientWidth = clientRect.right - clientRect.left;
+                            int clientHeight = clientRect.bottom - clientRect.top;
+
+                            // Fensterstil und erweiterte Stile ermitteln
+                            DWORD style = GetWindowLong(window.hwnd, GWL_STYLE);
+                            DWORD exStyle = GetWindowLong(window.hwnd, GWL_EXSTYLE);
+
+                            // Anpassung der Fenstergröße basierend auf dem klienten Bereich
+                            RECT adjustedRect = {0, 0, clientWidth, clientHeight};
+                            AdjustWindowRectEx(&adjustedRect, style, FALSE, exStyle);
+
+                            // Berechnete Fenstergröße
+                            int adjustedWidth = adjustedRect.right - adjustedRect.left;
+                            int adjustedHeight = adjustedRect.bottom - adjustedRect.top;
+
+                            // Aktualisiere die maximale Breite
+                            if (adjustedWidth > maxAdjustedWidth) {
+                                maxAdjustedWidth = adjustedWidth;
+                            }
+
+                            numWindows++; // Increment the counter
+                        }
+                    }
+                }
+
+                // Anzahl der Fenster nebeneinander und die Anzahl der Fensterreihen berechnen
+                cols = screenWidth / maxAdjustedWidth;
+                rows = (numWindows + cols - 1) / cols;
+                windowWidth = screenWidth / cols; // Calculate the window width
+                windowHeight = (screenHeight - 50) / rows; // Calculate the window height
+
+                // Fenster anordnen
+                x = 0;
+                y = 0;
+                for (const auto& entry : processWindowsMap) { // Iterate through all processes
+                    for (const auto& window : entry.second) { // Iterate through all windows of a process
+                        if (window.checked) { // Check if the window is selected
+                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth, windowHeight, TRUE); // Move and resize the window
+                            ProcessMessages(); // Process messages
+
                             x += windowWidth; // Increment the X position
                             if (x >= screenWidth) { // Check if the X position exceeds the screen width
                                 x = 0; // Reset the X position
@@ -1354,22 +1515,22 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             } else if (HIWORD(wParam) == EN_SETFOCUS && LOWORD(wParam) == IDC_SEARCHBOX) {
                 wchar_t text[256];
                 GetWindowText(hSearchBox, text, 256);
-                if (wcscmp(text, L"Search name") == 0) {
+                if (wcscmp(text, L"Search name (CTRL-F)") == 0) {
                     SetWindowText(hSearchBox, L"");
                 }
             } else if (HIWORD(wParam) == EN_KILLFOCUS && LOWORD(wParam) == IDC_SEARCHBOX) {
                 wchar_t text[256];
                 GetWindowText(hSearchBox, text, 256);
                 if (wcslen(text) == 0) {
-                    SetEditPlaceholder(hSearchBox, L"Search name");
+                    SetEditPlaceholder(hSearchBox, L"Search name (CTRL-F)");
                 }
             } else if (HIWORD(wParam) == EN_CHANGE && LOWORD(wParam) == IDC_SEARCHBOX) {
                 wchar_t searchString[256];
                 GetWindowTextW(hSearchBox, searchString, 256);
                 SearchAndCheck(searchString, hwnd);
             }
-            }
-            break;
+        }
+        break;
 
         case WM_LBUTTONDOWN: { // Message when the left mouse button is pressed
             isScrolling = true; // Start scrolling
@@ -1453,6 +1614,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             //InvalidateWindow(hwnd);
         }
         break;
+
+        /*case WM_MOVE:
+        {
+            int xPos = (int)(short)LOWORD(lParam); // horizontale Position
+            int yPos = (int)(short)HIWORD(lParam); // vertikale Position
+
+            // Setze die neuen Standardkoordinaten
+            defaultXPos = xPos;
+            defaultYPos = yPos;
+        }
+        break;*/
 
         case WM_MOUSEMOVE: { // Message when the mouse is moved
             if (isScrolling) { // Check if scrolling
@@ -1649,9 +1821,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 RECT rect = {10, yPos, textWidth, yPos + 30};
 
                 if (i == highlightedRow && highlightedWindowRow == -1) {
-                    HBRUSH highlightBrush = CreateSolidBrush(RGB(211, 211, 211)); // Hellgrau
+                    HBRUSH highlightBrush = CreateSolidBrush(RGB(224, 224, 224)); // Hellgrau
                     FillRect(hdcMem, &rect, highlightBrush);
                     DeleteObject(highlightBrush);
+
+                    // Hellblaue Linie am unteren Rand
+                    HPEN bluePen = CreatePen(PS_SOLID, 2, RGB(74, 204, 229)); // Hellblau
+                    HPEN oldPen = (HPEN)SelectObject(hdcMem, bluePen);
+                    MoveToEx(hdcMem, rect.left, rect.bottom - 1, NULL);
+                    LineTo(hdcMem, rect.right, rect.bottom - 1);
+                    SelectObject(hdcMem, oldPen);
+                    DeleteObject(bluePen);
                 } else {
                     HBRUSH whiteBrush = CreateSolidBrush(RGB(255, 255, 255)); // Weiß
                     FillRect(hdcMem, &rect, whiteBrush);
@@ -1724,9 +1904,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             RECT windowRect = { 90, yPos, textWidth, yPos + 30 };
 
                             if (i*100000+j == highlightedWindowRow) {
-                                HBRUSH highlightBrush = CreateSolidBrush(RGB(211, 211, 211)); // Hellgrau
+                                HBRUSH highlightBrush = CreateSolidBrush(RGB(224, 224, 224)); // Hellgrau
                                 FillRect(hdcMem, &windowRect, highlightBrush);
                                 DeleteObject(highlightBrush);
+
+                                // Hellblaue Linie am unteren Rand
+                                HPEN bluePen = CreatePen(PS_SOLID, 2, RGB(74, 204, 229)); // Hellblau
+                                HPEN oldPen = (HPEN)SelectObject(hdcMem, bluePen);
+                                MoveToEx(hdcMem, windowRect.left, windowRect.bottom - 1, NULL);
+                                LineTo(hdcMem, windowRect.right, windowRect.bottom - 1);
+                                SelectObject(hdcMem, oldPen);
+                                DeleteObject(bluePen);
                             } else {
                                 HBRUSH whiteBrush = CreateSolidBrush(RGB(255, 255, 255)); // Weiß
                                 FillRect(hdcMem, &windowRect, whiteBrush);
@@ -1782,7 +1970,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         break;
 
-
         case WM_SIZE: { // Message when the window size is changed
             RECT rect; // Declaration of a RECT structure to store the client rectangles
             GetClientRect(hwnd, &rect); // Retrieve the client rectangles of the window
@@ -1828,7 +2015,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 // Call the same functions as in WM_CREATE
                 CreateTrayIcon(hwnd);
                 UpdateWindowList(hwnd);
-                hwndTT = CreateTooltip(hwnd);
+                //hwndTT = CreateTooltip(hwnd);
 
                 /*HMENU hMenu = CreateMenu();
                 AppendMenu(hMenu, MF_STRING, ID_MINIMIZE, L"&Minimize Window(s)");
