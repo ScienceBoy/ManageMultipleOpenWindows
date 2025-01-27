@@ -32,15 +32,22 @@ extern "C" BOOL SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT value);
 
 #define WM_TRAYICON (WM_USER + 1) // Define a custom message for the tray icon
 #define WM_UPDATE_LIST (WM_USER + 2) // Define a custom message to update the window list
-#define ID_MINIMIZE 2000
-#define ID_RESTORE  2001
-#define ID_CLOSE    2002
-#define ID_ARRANGE  2003 // Needs 2003-200x for enumerate all screens
-#define ID_MAXIMIZE 2050
-#define ID_MOVE_TO_SCREEN_BASE 2104
-#define IDC_SEARCHBOX 101
-#define IDC_ERASEBUTTON 201
-#define IDC_GOTOBUTTON 301
+#define IDC_SEARCHBOX            101
+#define IDC_ERASEBUTTON          201
+#define IDC_GOTOBUTTON           301
+#define ID_MINIMIZE             2000
+#define ID_RESTORE              2001
+#define ID_CLOSE                2002
+#define ID_ARRANGE              2003 // Needs 2003-200x for enumerate all screens
+#define ID_MAXIMIZE             2050
+#define ID_MOVE_TO_SCREEN_BASE  2104
+#define ID_SAVEANDCLOSE         2200
+#define ID_BUTTON_START         2300
+#define IDI_ICON_MINIMIZE       3101
+#define IDI_ICON_ARRANGE        3102
+#define IDI_ICON_CLOSE          3103
+#define ID_EXIT_BUTTON          3200 
+#define ID_QUITMENU_BUTTON      3300
 
 
 // Structure to store window information
@@ -60,11 +67,19 @@ struct MonitorInfo {
     std::wstring position;
 };
 
+bool operator==(const RECT& lhs, const RECT& rhs) {
+    return lhs.left == rhs.left &&
+           lhs.top == rhs.top &&
+           lhs.right == rhs.right &&
+           lhs.bottom == rhs.bottom;
+}
 
 // Function declarations
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam); // Callback function to list open windows
 std::vector<WindowInfo> getOpenWindows(); // Function to return open windows
+LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam); // Window procedure to handle messages
+void CreateCustomMenu(HWND parentHwnd, POINT pt);
 void ShowLastError(LPCSTR message); // Function to display the last error
 void CreateTrayIcon(HWND hwnd); // Function to create the tray icon
 void RemoveTrayIcon(HWND hwnd); // Function to remove the tray icon
@@ -100,10 +115,12 @@ int highlightedRow = -1; // Globale Variable zur Speicherung der hervorgehobenen
 int highlightedWindowRow = -1; // Globale Variable zur Speicherung der hervorgehobenen Fensterzeile
 bool isRedrawPending = false;
 int screenCount = 1;
-int textWidth = 800;
+int textWidth = 900;
 static int defaultYPos = -1;
 static int defaultXPos = 0;
 bool blinkState = false; // Globale Variable für den Blinkzustand
+int globalScreenIndexChosen = 1;
+int currentLine = -1;
 
 HWND hwndTT;
 HWND hSearchBox;
@@ -112,6 +129,7 @@ HWND hGoToButton;
 HMENU hMenu;
 
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
+    //std::cout << "EnumWindowsProc" << std::endl;
     wchar_t title[256]; // Buffer für den Fenstertitel
     DWORD processId; // Prozess-ID
     GetWindowThreadProcessId(hwnd, &processId); // Prozess-ID des Fensters abrufen
@@ -158,12 +176,17 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     return TRUE; // Enumeration fortsetzen
 }
 
-int getTaskbarHeight() {
+int getTaskbarHeight(HWND hwnd) {
+    //std::cout << "getTaskbarHeight" << std::endl;
     HWND taskbar = FindWindow(L"Shell_TrayWnd", NULL);
     if (taskbar) {
         RECT rect;
         if (GetWindowRect(taskbar, &rect)) {
-            return rect.bottom - rect.top;
+            UINT dpi = GetDpiForWindow(hwnd);
+            float scaleFactor = dpi / 96.0f; // 96 ist der Standard-DPI-Wert
+            int taskbarHeight = (rect.bottom - rect.top) / scaleFactor;
+            ////std::cout << "taskbar height: " << taskbarHeight << std::endl;
+            return taskbarHeight;
         }
     }
     return 0; // Fehlerfall
@@ -171,6 +194,7 @@ int getTaskbarHeight() {
 
 // Function to return open windows
 std::vector<WindowInfo> getOpenWindows() {
+    //std::cout << "getOpenWindows" << std::endl;
     std::vector<WindowInfo> windows; // Vector to store windows
     EnumWindows(EnumWindowsProc, reinterpret_cast<LPARAM>(&windows)); // Enumerate windows
     return windows; // Return the list of windows
@@ -178,11 +202,13 @@ std::vector<WindowInfo> getOpenWindows() {
 
 // Function to minimize the window to the tray
 void MinimizeToTray(HWND hwnd) {
+    //std::cout << "MinimizeToTray" << std::endl;
     ShowWindow(hwnd, SW_HIDE); // Hide the window
 }
 
 // Function to create the tray icon
 void CreateTrayIcon(HWND hwnd) {
+    //std::cout << "CreateTrayIcon" << std::endl;
     NOTIFYICONDATAW nid = {}; // Structure for the tray icon
     nid.cbSize = sizeof(nid); // Size of the structure
     nid.hWnd = hwnd; // Handle of the window
@@ -196,6 +222,7 @@ void CreateTrayIcon(HWND hwnd) {
 
 // Function to remove the tray icon
 void RemoveTrayIcon(HWND hwnd) {
+    //std::cout << "RemoveTrayIcon" << std::endl;
     NOTIFYICONDATAW nid = {}; // Structure for the tray icon
     nid.cbSize = sizeof(nid); // Size of the structure
     nid.hWnd = hwnd; // Handle of the window
@@ -204,18 +231,25 @@ void RemoveTrayIcon(HWND hwnd) {
 }
 
 // Function to display the tray menu
-void ShowTrayMenu(HWND hwnd) {
-    POINT pt; // Structure for the cursor position
-    GetCursorPos(&pt); // Get the cursor position
-    SetForegroundWindow(hwnd); // Bring the window to the foreground
-    HMENU hMenu = CreatePopupMenu(); // Create the popup menu
-    AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit"); // Add a menu item
-    TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, NULL); // Display the menu
-    DestroyMenu(hMenu); // Destroy the menu
+void ShowTrayMenu(HWND hwnd){
+    //std::cout << "ShowTrayMenu" << std::endl;
+    POINT pt; // Struktur für die Cursorposition
+    GetCursorPos(&pt); // Cursorposition abrufen
+    SetForegroundWindow(hwnd); // Fenster in den Vordergrund bringen
+
+    // Benutzerdefiniertes Menü anzeigen
+    CreateCustomMenu(hwnd, pt);
+
+    // Optional: Standard-Popup-Menü hinzufügen
+    /*HMENU hMenu = CreatePopupMenu(); // Popup-Menü erstellen
+    AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit"); // Menüeintrag hinzufügen
+    TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, NULL); // Menü anzeigen
+    DestroyMenu(hMenu);*/ // Menü zerstören
 }
 
 // Function to process messages
 void ProcessMessages() {
+    //std::cout << "ProcessMessages" << std::endl;
     MSG msg; // Structure for the message
     while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) { // Retrieve messages
         TranslateMessage(&msg); // Translate the message
@@ -225,14 +259,31 @@ void ProcessMessages() {
 
 // Function to save the current windows
 void SaveCurrentWindows() {
+    //std::cout << "SaveCurrentWindows" << std::endl;
     currentWindows = getOpenWindows(); // Save the current windows
 }
 
 bool CompareMonitors(const MonitorInfo& a, const MonitorInfo& b) {
+    //std::cout << "CompareMonitors" << std::endl;
     return a.rect.left < b.rect.left;
 }
 
+bool CompareMonitorsWidthAndHeight(const MonitorInfo& a, const MonitorInfo& b) {
+    //std::cout << "CompareMonitorsWidthAndHeight" << std::endl;
+    int widthA = a.rect.right - a.rect.left;
+    int widthB = b.rect.right - b.rect.left;
+    
+    if (widthA != widthB) {
+        return widthA > widthB;
+    } else {
+        int heightA = a.rect.bottom - a.rect.top;
+        int heightB = b.rect.bottom - b.rect.top;
+        return heightA > heightB;
+    }
+}
+
 RECT GetScreenRect(int screenIndex) {
+    //std::cout << "GetScreenRect" << std::endl;
     std::vector<MonitorInfo> monitors;
     EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, (LPARAM)&monitors);
 
@@ -244,13 +295,14 @@ RECT GetScreenRect(int screenIndex) {
     return monitors[screenIndex].rect;
 }
 
-
 BOOL CALLBACK RedrawWindowCallback(HWND hwnd, LPARAM lParam) {
+    //std::cout << "RedrawWindowCallback" << std::endl;
     RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     return TRUE;
 }
 
 void ClearTemporaryTiles(HWND hwnd) {
+    //std::cout << "ClearTemporaryTiles" << std::endl;
     HDC hdcScreen = GetDC(NULL); // HDC für den gesamten Bildschirm
     if (!hdcScreen) {
         throw std::runtime_error("GetDC failed");
@@ -267,11 +319,12 @@ void ClearTemporaryTiles(HWND hwnd) {
 }
 
 void DrawRectangleWithScaling(HDC hdc, HWND hwnd, RECT screenRect, int x, int y, int windowWidth, int windowHeight) {
+    //std::cout << "DrawRectangleWithScaling" << std::endl;
     // Ermitteln des DPI-Werts für das Fenster
     UINT dpi = GetDpiForWindow(hwnd);
     float scaleFactor = dpi / 96.0f; // 96 ist der Standard-DPI-Wert
 
-    //std::cout << "scaleFactor: " << scaleFactor << std::endl;
+    ////std::cout << "scaleFactor: " << scaleFactor << std::endl;
 
     // Anpassen der Koordinaten basierend auf dem Skalierungsfaktor
     RECT tileRect = {
@@ -285,13 +338,13 @@ void DrawRectangleWithScaling(HDC hdc, HWND hwnd, RECT screenRect, int x, int y,
     Rectangle(hdc, tileRect.left, tileRect.top, tileRect.right, tileRect.bottom);
 }
 
-
 void ShowTemporaryTiles(HWND hwnd, int screenIndex) {
+    //std::cout << "ShowTemporaryTiles" << std::endl;
     try {
         RECT screenRect = GetScreenRect(screenIndex);
         int screenWidth = screenRect.right - screenRect.left;
-        int screenHeight = screenRect.bottom - screenRect.top;
-        std::cout << "screenWidth: " << screenWidth << std::endl;
+        int screenHeight = screenRect.bottom - screenRect.top - getTaskbarHeight(hwnd);
+        ////std::cout << "screenWidth: " << screenWidth << std::endl;
 
         int numWindows = 0; // Counter for the number of windows
         for (auto& entry : processWindowsMap) { // Iterate through all processes
@@ -302,111 +355,115 @@ void ShowTemporaryTiles(HWND hwnd, int screenIndex) {
                 }
             }
         }
-        std::cout << "numWindows: " << numWindows << std::endl;
+        ////std::cout << "numWindows: " << numWindows << std::endl;
 
-        int cols = static_cast<int>(ceil(sqrt(numWindows))); // Calculate the number of columns
-        int rows = (numWindows + cols - 1) / cols; // Calculate the number of rows
-        std::cout << "cols: " << cols << std::endl;
-        std::cout << "rows: " << rows << std::endl;
-        int windowWidth = (screenWidth) / cols; // Calculate the window width
-        int windowHeight = (screenHeight - getTaskbarHeight()) / rows; // Calculate the window height
-        std::cout << "windowWidth: " << windowWidth << std::endl;
+        if (numWindows > 0) 
+        {
+            int cols = static_cast<int>(ceil(sqrt(numWindows))); // Calculate the number of columns
+            int rows = (numWindows + cols - 1) / cols; // Calculate the number of rows
+            ////std::cout << "cols: " << cols << std::endl;
+            ////std::cout << "rows: " << rows << std::endl;
+            int windowWidth = (screenWidth) / cols; // Calculate the window width
+            int windowHeight = (screenHeight) / rows; // Calculate the window height
+            ////std::cout << "windowWidth: " << windowWidth << std::endl;
 
-        int x = 0, y = 0; // Initialize the X and Y positions
-        /*int maxAdjustedWidth = 0;
-        numWindows = 0;
+            int x = 0, y = 0; // Initialize the X and Y positions
+            /*int maxAdjustedWidth = 0;
+            numWindows = 0;
 
-        // Zuerst die Breite des breitesten Fensters ermitteln
-        for (const auto& entry : processWindowsMap) { // Iterate through all processes
-            for (const auto& window : entry.second) { // Iterate through all windows of a process
-                if (window.checked) { // Check if the window is selected
-                    // Größe des klienten Bereichs ermitteln
-                    RECT clientRect;
-                    GetClientRect(window.hwnd, &clientRect);
-                    int clientWidth = clientRect.right - clientRect.left;
-                    int clientHeight = clientRect.bottom - clientRect.top;
+            // Zuerst die Breite des breitesten Fensters ermitteln
+            for (const auto& entry : processWindowsMap) { // Iterate through all processes
+                for (const auto& window : entry.second) { // Iterate through all windows of a process
+                    if (window.checked) { // Check if the window is selected
+                        // Größe des klienten Bereichs ermitteln
+                        RECT clientRect;
+                        GetClientRect(window.hwnd, &clientRect);
+                        int clientWidth = clientRect.right - clientRect.left;
+                        int clientHeight = clientRect.bottom - clientRect.top;
 
-                    // Fensterstil und erweiterte Stile ermitteln
-                    DWORD style = GetWindowLong(window.hwnd, GWL_STYLE);
-                    DWORD exStyle = GetWindowLong(window.hwnd, GWL_EXSTYLE);
+                        // Fensterstil und erweiterte Stile ermitteln
+                        DWORD style = GetWindowLong(window.hwnd, GWL_STYLE);
+                        DWORD exStyle = GetWindowLong(window.hwnd, GWL_EXSTYLE);
 
-                    // Anpassung der Fenstergröße basierend auf dem klienten Bereich
-                    RECT adjustedRect = {0, 0, clientWidth, clientHeight};
-                    AdjustWindowRectEx(&adjustedRect, style, FALSE, exStyle);
+                        // Anpassung der Fenstergröße basierend auf dem klienten Bereich
+                        RECT adjustedRect = {0, 0, clientWidth, clientHeight};
+                        AdjustWindowRectEx(&adjustedRect, style, FALSE, exStyle);
 
-                    // Berechnete Fenstergröße
-                    int adjustedWidth = adjustedRect.right - adjustedRect.left;
-                    int adjustedHeight = adjustedRect.bottom - adjustedRect.top;
+                        // Berechnete Fenstergröße
+                        int adjustedWidth = adjustedRect.right - adjustedRect.left;
+                        int adjustedHeight = adjustedRect.bottom - adjustedRect.top;
 
-                    // Aktualisiere die maximale Breite
-                    if (adjustedWidth > maxAdjustedWidth) {
-                        maxAdjustedWidth = adjustedWidth;
+                        // Aktualisiere die maximale Breite
+                        if (adjustedWidth > maxAdjustedWidth) {
+                            maxAdjustedWidth = adjustedWidth;
+                        }
+
+                        numWindows++; // Increment the counter
                     }
-
-                    numWindows++; // Increment the counter
                 }
             }
-        }
 
-        if (numWindows == 0) {
-            return; // Keine Fenster zum Anordnen
-            //maxAdjustedWidth = windowWidth;
-        }
+            if (numWindows == 0) {
+                return; // Keine Fenster zum Anordnen
+                //maxAdjustedWidth = windowWidth;
+            }
 
-        cols = screenWidth / maxAdjustedWidth;
-        rows = (numWindows + cols - 1) / cols;
-        windowWidth = screenWidth / cols;
-        windowHeight = (screenHeight - 50) / rows;*/
+            cols = screenWidth / maxAdjustedWidth;
+            rows = (numWindows + cols - 1) / cols;
+            windowWidth = screenWidth / cols;
+            windowHeight = (screenHeight - 50) / rows;*/
 
-        HDC hdcScreen = GetDC(NULL); // HDC für den gesamten Bildschirm
-        if (!hdcScreen) {
-            throw std::runtime_error("GetDC failed");
-        }
+            HDC hdcScreen = GetDC(NULL); // HDC für den gesamten Bildschirm
+            if (!hdcScreen) {
+                throw std::runtime_error("GetDC failed");
+            }
 
-        HPEN hPen = CreatePen(PS_SOLID, 1, RGB(0, 0, 255)); // Blauer Stift mit Dicke 1
-        if (!hPen) {
-            ReleaseDC(NULL, hdcScreen);
-            throw std::runtime_error("CreatePen failed");
-        }
+            HPEN hPen = CreatePen(PS_SOLID, 1, RGB(0, 0, 255)); // Blauer Stift mit Dicke 1
+            if (!hPen) {
+                ReleaseDC(NULL, hdcScreen);
+                throw std::runtime_error("CreatePen failed");
+            }
 
-        HPEN hOldPen = (HPEN)SelectObject(hdcScreen, hPen);
-        if (!hOldPen) {
+            HPEN hOldPen = (HPEN)SelectObject(hdcScreen, hPen);
+            if (!hOldPen) {
+                DeleteObject(hPen);
+                ReleaseDC(NULL, hdcScreen);
+                throw std::runtime_error("SelectObject failed");
+            }
+
+            HBRUSH hBrush = (HBRUSH)GetStockObject(NULL_BRUSH); // Kein Füllpinsel
+            HBRUSH hOldBrush = (HBRUSH)SelectObject(hdcScreen, hBrush);
+
+            x = 0, y = 0;
+            for (const auto& entry : processWindowsMap) { // Iterate through all processes
+                for (const auto& window : entry.second) { // Iterate through all windows of a process
+                    if (window.checked) { // Check if the window is selected
+                        RECT tileRect = {screenRect.left + x, screenRect.top + y, screenRect.left + x + windowWidth, screenRect.top + y + windowHeight};
+                        Rectangle(hdcScreen, tileRect.left, tileRect.top, tileRect.right, tileRect.bottom);
+                        //DrawRectangleWithScaling(hdcScreen, hwnd, screenRect, x, y, windowWidth, windowHeight);
+
+                        x += windowWidth;
+                        if (x >= screenWidth) {
+                            x = 0;
+                            y += windowHeight;
+                        }
+                    }
+                }
+            }
+            SelectObject(hdcScreen, hOldPen);
+            SelectObject(hdcScreen, hOldBrush);
             DeleteObject(hPen);
             ReleaseDC(NULL, hdcScreen);
-            throw std::runtime_error("SelectObject failed");
+
+            SetForegroundWindow(hwnd); // Bringe das Programmfenster in den Vordergrund
         }
-
-        HBRUSH hBrush = (HBRUSH)GetStockObject(NULL_BRUSH); // Kein Füllpinsel
-        HBRUSH hOldBrush = (HBRUSH)SelectObject(hdcScreen, hBrush);
-
-        x = 0, y = 0;
-        for (const auto& entry : processWindowsMap) { // Iterate through all processes
-            for (const auto& window : entry.second) { // Iterate through all windows of a process
-                if (window.checked) { // Check if the window is selected
-                    RECT tileRect = {screenRect.left + x, screenRect.top + y, screenRect.left + x + windowWidth, screenRect.top + y + windowHeight};
-                    Rectangle(hdcScreen, tileRect.left, tileRect.top, tileRect.right, tileRect.bottom);
-                    //DrawRectangleWithScaling(hdcScreen, hwnd, screenRect, x, y, windowWidth, windowHeight);
-
-                    x += windowWidth;
-                    if (x >= screenWidth) {
-                        x = 0;
-                        y += windowHeight;
-                    }
-                }
-            }
-        }
-        SelectObject(hdcScreen, hOldPen);
-        SelectObject(hdcScreen, hOldBrush);
-        DeleteObject(hPen);
-        ReleaseDC(NULL, hdcScreen);
-
-        SetForegroundWindow(hwnd); // Bringe das Programmfenster in den Vordergrund
     } catch (const std::exception& e) {
-        MessageBox(hwnd, std::wstring(e.what(), e.what() + strlen(e.what())).c_str(), L"Error", MB_OK);
+        MessageBox(hwnd, std::wstring(e.what(), e.what() + strlen(e.what())).c_str(), L"Error in ShowTemporaryTiles", MB_OK);
     }
 }
 
 BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
+    //std::cout << "MonitorEnumProc" << std::endl;
     std::vector<MonitorInfo>* monitors = reinterpret_cast<std::vector<MonitorInfo>*>(dwData);
     
     MONITORINFOEX mi;
@@ -414,10 +471,12 @@ BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMoni
     if (GetMonitorInfo(hMonitor, &mi)) {
         monitors->push_back({static_cast<int>(monitors->size()), mi.rcMonitor, L""});
     }
+    //std::cout << "MonitorEnumProc beendet" << std::endl;
     return TRUE;
 }
 
 bool IsValidInput(const wchar_t* input) {
+    //std::cout << "IsValidInput" << std::endl;
     while (*input) {
         if (!iswalnum(*input) && // Alphanumerische Zeichen
             *input != L'\\' && *input != L'/' && // Backslash und Forwardslash
@@ -435,6 +494,7 @@ bool IsValidInput(const wchar_t* input) {
 }
 
 void MoveWindowToScreen(HWND hwnd, int screenIndex) {
+    //std::cout << "MoveWindowToScreen" << std::endl;
     if (!IsWindow(hwnd)) {
         //MessageBox(NULL, "Ungueltiges Fenster-Handle", "Fehler", MB_OK | MB_ICONERROR);
         return;
@@ -469,8 +529,8 @@ void MoveWindowToScreen(HWND hwnd, int screenIndex) {
     }
 }
 
-
 HBITMAP CaptureAndResizeScreen(HWND hwnd, RECT rect, int width, int height) {
+    //std::cout << "CaptureAndResizeScreen" << std::endl;
     HDC hdcScreen = GetDC(NULL);
     HDC hdcMem = CreateCompatibleDC(hdcScreen);
     HBITMAP hbmScreen = CreateCompatibleBitmap(hdcScreen, rect.right - rect.left, rect.bottom - rect.top);
@@ -501,6 +561,7 @@ HBITMAP CaptureAndResizeScreen(HWND hwnd, RECT rect, int width, int height) {
 }
 
 void AddMenuItemWithImage(HMENU hMenu, UINT uIDNewItem, HBITMAP hBitmap, const std::wstring& text) {
+    //std::cout << "AddMenuItemWithImage" << std::endl;
     MENUITEMINFOW mii = { sizeof(MENUITEMINFOW) };
     mii.fMask = MIIM_BITMAP | MIIM_STRING | MIIM_ID;
     mii.wID = uIDNewItem;
@@ -511,6 +572,7 @@ void AddMenuItemWithImage(HMENU hMenu, UINT uIDNewItem, HBITMAP hBitmap, const s
 }
 
 void MoveWindowToPrimaryMonitor(HWND hwnd) {
+    //std::cout << "MoveWindowToPrimaryMonitor" << std::endl;
     // Get the primary monitor's work area
     RECT primaryMonitorRect;
     SystemParametersInfo(SPI_GETWORKAREA, 0, &primaryMonitorRect, 0);
@@ -528,29 +590,59 @@ void MoveWindowToPrimaryMonitor(HWND hwnd) {
 }
 
 void CreateMoveToScreenMenu(HMENU hMenu) {
+    //std::cout << "CreateMoveToScreenMenu" << std::endl;
     HMENU hMoveToScreenMenu = CreateMenu();
     std::vector<MonitorInfo> monitors;
     EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, reinterpret_cast<LPARAM>(&monitors));
 
+    // Sortiere die Monitore nach ihrer Breite
+    std::sort(monitors.begin(), monitors.end(), CompareMonitorsWidthAndHeight);
+    /*for (const auto& monitor : monitors) {
+    std::wcout << L"Monitor " << monitor.index << L": " 
+               << (monitor.rect.right - monitor.rect.left) << L" width" << std::endl;
+    }*/
+ 
+    auto largestMonitor = monitors[0];
+    auto secondLargestMonitor = monitors[0];
+    if (monitors.size() > 1) {
+        secondLargestMonitor = monitors[1];
+    }
+    int widthLargestMonitor = largestMonitor.rect.bottom - largestMonitor.rect.top;
+    int widthSecondLargestMonitor = secondLargestMonitor.rect.bottom - secondLargestMonitor.rect.top;
+
+    ////std::cout << largestMonitor.index << std::endl;
+    ////std::cout << largestMonitor.rect.right - largestMonitor.rect.left << " " << largestMonitor.rect.bottom - largestMonitor.rect.top << std::endl;
+    int width = largestMonitor.rect.right - largestMonitor.rect.left;
+    int height = largestMonitor.rect.bottom - largestMonitor.rect.top;
+    int newWidth, newHeight;
+    int firstIconHeight = 0; // Variable to store the height of the first icon
+
+    // Berechne das Seitenverhältnis für den breitesten Monitor
+    if (width > height) {
+        newWidth = 25;
+        newHeight = static_cast<int>(35.0 * height / width);
+    } else {
+        newHeight = 25;
+        newWidth = static_cast<int>(35.0 * width / height);
+    }
+    firstIconHeight = newHeight; // Speichere die Höhe des ersten Icons
+    
     // Sortiere die Monitore nach ihrer linken Koordinate
     std::sort(monitors.begin(), monitors.end(), CompareMonitors);
 
     if (monitors.size() > 1) { // Check if more than one screen is present
         screenCount = -1;
-        
-        int firstIconHeight = 0; // Variable to store the height of the first icon
 
         for (const auto& monitor : monitors) {
             screenCount++;
-            int width = monitor.rect.right - monitor.rect.left;
-            int height = monitor.rect.bottom - monitor.rect.top;
+            width = monitor.rect.right - monitor.rect.left;
+            height = monitor.rect.bottom - monitor.rect.top;
+            newHeight = firstIconHeight;
             std::wstring menuText = L"Screen " + std::to_wstring(screenCount + 1) + L" (" + 
                                     std::to_wstring(width) + L"x" + 
                                     std::to_wstring(height) + L")";
 
-            // Berechne das neue Seitenverhältnis
-            int newWidth, newHeight;
-           if (screenCount == 0) {
+            /*if (screenCount == 0) {
                 // Berechne das Seitenverhältnis für den ersten Monitor
                 if (width > height) {
                     newWidth = 25;
@@ -560,11 +652,17 @@ void CreateMoveToScreenMenu(HMENU hMenu) {
                     newWidth = static_cast<int>(35.0 * width / height);
                 }
                 firstIconHeight = newHeight; // Speichere die Höhe des ersten Icons
-            } else {
+            } else {*/
                 // Berechne die Größe der Icons für die weiteren Monitore
-                newHeight = firstIconHeight;
-                newWidth = static_cast<int>(newHeight * width / height);
-            }
+                //newWidth = static_cast<int>(newHeight * width / height);
+                ////std::cout << largestMonitor.index << " " << monitor.index << std::endl;
+                ////std::cout << newWidth << " " << newHeight << std::endl;
+                ////std::cout << width << " " << height << std::endl;
+                if (monitor.rect == largestMonitor.rect) newHeight = static_cast<int>(newHeight * widthLargestMonitor / widthSecondLargestMonitor);
+                ////std::cout << newWidth << " " << newHeight << std::endl;
+
+
+            //}
 
             HBITMAP hBitmap = CaptureAndResizeScreen(NULL, monitor.rect, newWidth, newHeight);
             AddMenuItemWithImage(hMoveToScreenMenu, ID_MOVE_TO_SCREEN_BASE + monitor.index, hBitmap, menuText);
@@ -578,6 +676,7 @@ void CreateMoveToScreenMenu(HMENU hMenu) {
 
 // Funktion zum Trimmen von Leerzeichen
 std::wstring trim(const std::wstring& str) {
+    //std::cout << "trim" << std::endl;
     size_t first = str.find_first_not_of(L' ');
     if (first == std::wstring::npos) return L"";
     size_t last = str.find_last_not_of(L' ');
@@ -586,6 +685,7 @@ std::wstring trim(const std::wstring& str) {
 
 // Funktion zum Umwandeln von Großbuchstaben in nur den ersten Großbuchstaben
 std::wstring capitalizeIfAllCaps(const std::wstring& str) {
+    //std::cout << "capitalizeIfAllCaps" << std::endl;
     bool allCaps = true;
     for (wchar_t c : str) {
         if (!std::iswupper(c)) {
@@ -606,12 +706,14 @@ std::wstring capitalizeIfAllCaps(const std::wstring& str) {
 }
 
 std::wstring toLower(const std::wstring& str) {
+    //std::cout << "toLower" << std::endl;
     std::wstring lowerStr = str;
     std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::towlower);
     return lowerStr;
 }
 
 void ShowTooltip(HWND hwnd, const wchar_t* message) {
+    //std::cout << "ShowTooltip" << std::endl;
     TOOLINFO ti = { 0 };
     ti.cbSize = sizeof(TOOLINFO);
     ti.uFlags = TTF_SUBCLASS | TTF_CENTERTIP;
@@ -637,28 +739,59 @@ void ShowTooltip(HWND hwnd, const wchar_t* message) {
 }
 
 void CreateArrangeOnScreenMenu(HMENU hMenu) {
+    //std::cout << "CreateArrangeOnScreenMenu" << std::endl;
+    HMENU hArrangeOnScreenMenu = CreateMenu();
     std::vector<MonitorInfo> monitors;
     EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, reinterpret_cast<LPARAM>(&monitors));
+    
+    // Sortiere die Monitore nach ihrer Breite
+    std::sort(monitors.begin(), monitors.end(), CompareMonitorsWidthAndHeight);
+    /*for (const auto& monitor : monitors) {
+    std::wcout << L"Monitor " << monitor.index << L": " 
+               << (monitor.rect.right - monitor.rect.left) << L" width" << std::endl;
+    }*/
 
+    auto largestMonitor = monitors[0];
+    auto secondLargestMonitor = monitors[0];
+    if (monitors.size() > 1) {
+        secondLargestMonitor = monitors[1];
+    }
+    int widthLargestMonitor = largestMonitor.rect.bottom - largestMonitor.rect.top;
+    int widthSecondLargestMonitor = secondLargestMonitor.rect.bottom - secondLargestMonitor.rect.top;
+
+    ////std::cout << largestMonitor.index << std::endl;
+    ////std::cout << largestMonitor.rect.right - largestMonitor.rect.left << " " << largestMonitor.rect.bottom - largestMonitor.rect.top << std::endl;
+    int width = largestMonitor.rect.right - largestMonitor.rect.left;
+    int height = largestMonitor.rect.bottom - largestMonitor.rect.top;
+    int newWidth, newHeight;
+    int firstIconHeight = 0; // Variable to store the height of the first icon
+
+    // Berechne das Seitenverhältnis für den breitesten Monitor
+    if (width > height) {
+        newWidth = 25;
+        newHeight = static_cast<int>(35.0 * height / width);
+    } else {
+        newHeight = 25;
+        newWidth = static_cast<int>(35.0 * width / height);
+    }
+    firstIconHeight = newHeight; // Speichere die Höhe des ersten Icons
+    
     // Sortiere die Monitore nach ihrer linken Koordinate
     std::sort(monitors.begin(), monitors.end(), CompareMonitors);
 
-    HMENU hArrangeOnScreenMenu = CreateMenu();
     //if (monitors.size() > 1) { // Check if more than one screen is present
         screenCount = -1;
 
-        int firstIconHeight = 0; // Variable to store the height of the first icon
-
         for (const auto& monitor : monitors) {
             screenCount++;
-            int width = monitor.rect.right - monitor.rect.left;
-            int height = monitor.rect.bottom - monitor.rect.top;
+            width = monitor.rect.right - monitor.rect.left;
+            height = monitor.rect.bottom - monitor.rect.top;
+            newHeight = firstIconHeight;
             std::wstring menuText = L"Screen " + std::to_wstring(screenCount + 1) + L" (" + 
                                     std::to_wstring(width) + L"x" + 
                                     std::to_wstring(height) + L")";
 
-            int newWidth, newHeight;
-            if (screenCount == 0) {
+            /*if (screenCount == 0) {
                 // Berechne das Seitenverhältnis für den ersten Monitor
                 if (width > height) {
                     newWidth = 25;
@@ -668,11 +801,17 @@ void CreateArrangeOnScreenMenu(HMENU hMenu) {
                     newWidth = static_cast<int>(35.0 * width / height);
                 }
                 firstIconHeight = newHeight; // Speichere die Höhe des ersten Icons
-            } else {
+            } else {*/
                 // Berechne die Größe der Icons für die weiteren Monitore
-                newHeight = firstIconHeight;
-                newWidth = static_cast<int>(newHeight * width / height);
-            }
+                //newWidth = static_cast<int>(newHeight * width / height);
+                ////std::cout << largestMonitor.index << " " << monitor.index << std::endl;
+                ////std::cout << newWidth << " " << newHeight << std::endl;
+                ////std::cout << width << " " << height << std::endl;
+                if (monitor.rect == largestMonitor.rect) newHeight = static_cast<int>(newHeight * widthLargestMonitor / widthSecondLargestMonitor);
+                ////std::cout << newWidth << " " << newHeight << std::endl;
+
+
+            //}
 
             HBITMAP hBitmap = CaptureAndResizeScreen(NULL, monitor.rect, newWidth, newHeight);
             AddMenuItemWithImage(hArrangeOnScreenMenu, ID_ARRANGE + monitor.index, hBitmap, menuText);
@@ -681,10 +820,12 @@ void CreateArrangeOnScreenMenu(HMENU hMenu) {
     //} else {
     //    AppendMenu(hMenu, MF_STRING, ID_ARRANGE, L"&Arrange Window(s)");
     //}
+    //std::cout << "CreateArrangeOnScreenMenu beendet" << std::endl;
 }
 
 // Function to check if the windows have changed
 bool HasWindowsChanged() {
+    //std::cout << "HasWindowsChanged" << std::endl;
     // Retrieve the current open windows
     auto newWindows = getOpenWindows();
     
@@ -708,6 +849,7 @@ bool HasWindowsChanged() {
 
 // Function to move the window to the main monitor
 void MoveWindowToMainMonitor(HWND hwnd) {
+    //std::cout << "MoveWindowToMainMonitor" << std::endl;
     //MessageBoxW(hwnd, L"aha1", L"Debug Info", MB_OK);
     WINDOWPLACEMENT wp;     // Überprüfe, ob das Fenster maximiert ist
     wp.length = sizeof(WINDOWPLACEMENT);
@@ -743,6 +885,7 @@ void MoveWindowToMainMonitor(HWND hwnd) {
 
 // Function to allow sorting case-insensitive
 bool caseInsensitiveCompare(const std::wstring& a, const std::wstring& b) {
+    //std::cout << "caseInsensitiveCompare" << std::endl;
     std::wstring lowerA = a;
     std::wstring lowerB = b;
     std::transform(lowerA.begin(), lowerA.end(), lowerA.begin(), ::towlower);
@@ -751,6 +894,7 @@ bool caseInsensitiveCompare(const std::wstring& a, const std::wstring& b) {
 }
 
 void SetEditPlaceholder(HWND hwndEdit, const std::wstring& placeholder) {
+    //std::cout << "SetEditPlaceholder" << std::endl;
     SetWindowText(hwndEdit, placeholder.c_str());
     SendMessage(hwndEdit, EM_SETSEL, 0, -1); // Markiere den gesamten Text
     SendMessage(hwndEdit, EM_SETSEL, -1, -1); // Entferne die Markierung
@@ -758,6 +902,7 @@ void SetEditPlaceholder(HWND hwndEdit, const std::wstring& placeholder) {
 
 // Function to allow on-mouse-over tooltip
 HWND CreateTooltip(HWND hwndParent) {
+    //std::cout << "CreateTooltip" << std::endl;
     HWND hwndTT = CreateWindowEx(WS_EX_TOPMOST, TOOLTIPS_CLASS, NULL,
         WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,        
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
@@ -771,6 +916,7 @@ HWND CreateTooltip(HWND hwndParent) {
 
 // Function to update the window list
 void UpdateWindowList(HWND hwnd) {
+    //std::cout << "UpdateWindowList" << std::endl;
     // Fensterinhalt löschen
     RECT rect;
     GetClientRect(hwnd, &rect);
@@ -950,6 +1096,7 @@ void UpdateWindowList(HWND hwnd) {
 
 // Function to adjust the window size
 void AdjustWindowSize(HWND hwnd) {
+    //std::cout << "AdjustWindowSize" << std::endl;
     RECT rect; // Declaration of a RECT structure to store the window size
     GetWindowRect(hwnd, &rect);
     int xPos = rect.left;
@@ -963,7 +1110,7 @@ void AdjustWindowSize(HWND hwnd) {
     GetScrollInfo(hwnd, SB_VERT, &si); // Retrieve the scroll information of the window
     int screenHeight = GetSystemMetrics(SM_CYSCREEN); // Retrieve the screen height
     int titleBarHeight = GetSystemMetrics(SM_CYCAPTION); // Retrieve the title bar height
-    int usableScreenHeight = screenHeight - titleBarHeight - 25 - getTaskbarHeight(); // Calculate the usable screen height (minus 50px to not be straight up to the bottom of the screen)
+    int usableScreenHeight = screenHeight - titleBarHeight - 25 - getTaskbarHeight(hwnd); // Calculate the usable screen height (minus 50px to not be straight up to the bottom of the screen)
     int contentHeight = si.nMax + 30 + 40; // Calculate the content height
     int contentWidth = textWidth; // Set the content width
     int newHeight = std::min(contentHeight, usableScreenHeight); // Calculate the new window height
@@ -971,16 +1118,15 @@ void AdjustWindowSize(HWND hwnd) {
     // Calculate the new y-position
     int newYPos = yPos - (newHeight - height);
 
-    // Überprüfen Sie, ob das Fenster am unteren Rand des Bildschirms abgeschnitten wird
-    if (newYPos + newHeight > screenHeight - getTaskbarHeight()) {
-        newYPos = screenHeight - getTaskbarHeight() - newHeight; // Verschieben Sie das Fenster nach oben, um es auf den Bildschirm zu passen
+    /*if (newYPos + newHeight > screenHeight - getTaskbarHeight(hwnd)) { // Überprüfen Sie, ob das Fenster am unteren Rand des Bildschirms abgeschnitten wird
+        newYPos = screenHeight - getTaskbarHeight(hwnd) - newHeight; // Verschieben Sie das Fenster nach oben, um es auf den Bildschirm zu passen
         if (newYPos < 0) {
             newYPos = 0; // Stellen Sie sicher, dass das Fenster nicht über den oberen Rand des Bildschirms hinaus verschoben wird
-            newHeight = screenHeight - titleBarHeight - 25 - getTaskbarHeight(); // Passen Sie die Höhe an, um auf den Bildschirm zu passen
+            newHeight = screenHeight - titleBarHeight - 25 - getTaskbarHeight(hwnd); // Passen Sie die Höhe an, um auf den Bildschirm zu passen
         }
         // Speichern Sie die neue Y-Koordinate als Standard
         defaultYPos = newYPos;
-    }
+    }*/
 
     // Verwenden Sie die Standard-Y-Koordinate, wenn sie gesetzt ist
     if (defaultYPos != -1) {
@@ -993,6 +1139,7 @@ void AdjustWindowSize(HWND hwnd) {
 }
 
 void InitializeMenu(HWND hwnd) {
+    //std::cout << "InitializeMenu" << std::endl;
     hMenu = CreateMenu();
     AppendMenu(hMenu, MF_STRING, ID_MINIMIZE, L"&Minimize Window(s)");
     AppendMenu(hMenu, MF_STRING, ID_MAXIMIZE, L"Ma&ximize Window(s)");
@@ -1002,11 +1149,13 @@ void InitializeMenu(HWND hwnd) {
     CreateArrangeOnScreenMenu(hMenu);
     CreateMoveToScreenMenu(hMenu);
 
-    AppendMenu(hMenu, MF_STRING, ID_CLOSE, L"&Close Window(s)");
+    //AppendMenu(hMenu, MF_STRING, ID_CLOSE, L"&Close Window(s)");
+    AppendMenu(hMenu, MF_STRING, ID_SAVEANDCLOSE, L"&Save And Close Window(s)");
     SetMenu(hwnd, hMenu);
 }
 
 void UpdateDynamicMenus(HWND hwnd) {
+    //std::cout << "UpdateDynamicMenus" << std::endl;
     // Entferne die alten dynamischen Einträge
     // Hier musst du die Positionen der dynamischen Einträge kennen
     // Angenommen, sie sind an den Positionen 3 und 4
@@ -1023,6 +1172,7 @@ void UpdateDynamicMenus(HWND hwnd) {
 }
 
 void InvalidateWindow(HWND hwnd) {
+    //std::cout << "InvalidateWindow" << std::endl;
     /*if (!isRedrawPending) {
         isRedrawPending = true;
         InvalidateWindow(hwnd);
@@ -1031,6 +1181,7 @@ void InvalidateWindow(HWND hwnd) {
 }
 
 void RefreshWindowList(HWND hwnd) {
+    //std::cout << "RefreshWindowList" << std::endl;
     // Invalidate and redraw the window immediately
     RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE); // Invalidate and redraw
 
@@ -1042,6 +1193,7 @@ void RefreshWindowList(HWND hwnd) {
 }
 
 bool compareWindowsByName(const WindowInfo& a, const WindowInfo& b) {
+    //std::cout << "compareWindowsByName" << std::endl;
     std::wstring nameA = a.title;
     std::wstring nameB = b.title;
     std::transform(nameA.begin(), nameA.end(), nameA.begin(), ::tolower);
@@ -1050,12 +1202,20 @@ bool compareWindowsByName(const WindowInfo& a, const WindowInfo& b) {
 }
 
 // Function to confirm closing windows
-bool ConfirmClose(HWND hwnd) {
-    int result = MessageBoxW(hwnd, L"Do you really want to close the selected windows?", L"Yes", MB_YESNO | MB_ICONQUESTION | MB_TOPMOST); // Display confirmation dialog
-    return (result == IDYES); // Return whether the user chose "Yes"
+bool ConfirmClose(HWND parentHwnd) {
+    //std::cout << "ConfirmClose" << std::endl;
+    // Bringe das Parent-Fenster in den Vordergrund
+    SetForegroundWindow(parentHwnd);
+
+    // Zeige das Bestätigungsdialogfeld an
+    int result = MessageBoxW(parentHwnd, L"Do you really want to close the selected windows?", L"Confirmation", MB_YESNO | MB_ICONQUESTION | MB_TOPMOST);
+
+    // Gib zurück, ob der Benutzer "Ja" gewählt hat
+    return (result == IDYES);
 }
 
 void SearchAndCheck(const std::wstring& searchString, HWND hwnd) {
+    //std::cout << "SearchAndCheck" << std::endl;
     std::wstring lowerSearchString = toLower(searchString);
 
     // Setze alle Checkboxen auf "unchecked" und klappe alle Prozesse zu
@@ -1128,6 +1288,7 @@ void SearchAndCheck(const std::wstring& searchString, HWND hwnd) {
 }
 
 void simulateWindowsKeyPress() {
+    //std::cout << "simulateWindowsKeyPress" << std::endl;
     INPUT inputs[2] = {};
 
     inputs[0].type = INPUT_KEYBOARD;
@@ -1141,6 +1302,7 @@ void simulateWindowsKeyPress() {
 }
 
 void simulateTextInput(const std::wstring& text) {
+    //std::cout << "simulateTextInput" << std::endl;
     INPUT* inputs = new INPUT[text.length() * 2];
 
     for (size_t i = 0; i < text.length(); ++i) {
@@ -1161,6 +1323,7 @@ void simulateTextInput(const std::wstring& text) {
 }
 
 void SearchAndCheckErase(HWND hwnd) {
+    //std::cout << "SearchAndCheckErase" << std::endl;
     for (size_t i = 0; i < processNames.size(); ++i) {
         const auto& processName = processNames[i];
         bool AlreadyOneChecked = false;
@@ -1196,8 +1359,459 @@ void SearchAndCheckErase(HWND hwnd) {
     //InvalidateRect(hwnd, NULL, TRUE);
 }
 
+void CreateCustomMenu(HWND parentHwnd, POINT pt) {
+    //std::cout << "CreateCustomMenu" << std::endl;
+    WNDCLASS wc = {};
+    wc.lpfnWndProc = CustomMenuProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = L"CustomMenuClass";
+    RegisterClass(&wc);
+
+    // Bildschirmgröße abrufen
+    RECT screenRect;
+    GetWindowRect(GetDesktopWindow(), &screenRect);
+
+    // Fenstergröße festlegen
+    int width = 320; // Breite des Fensters
+    int height = 30 * processNames.size() +  getTaskbarHeight(parentHwnd) + 10; // Höhe des Fensters basierend auf der Anzahl der Zeilen
+
+    // Position anpassen, um das Fenster innerhalb des sichtbaren Bereichs zu halten
+    if (pt.x + width > screenRect.right)
+        pt.x = screenRect.right - width;
+    if (pt.y + height > screenRect.bottom)
+        pt.y = screenRect.bottom - height;
+
+    HWND hwnd = CreateWindowEx(
+        0,
+        L"CustomMenuClass",
+        NULL,
+        WS_POPUP | WS_BORDER,
+        pt.x, pt.y, width, height,
+        parentHwnd,
+        NULL,
+        GetModuleHandle(NULL),
+        NULL
+    );
+
+    SetWindowPos(hwnd, HWND_TOPMOST, pt.x, pt.y, width, height, SWP_SHOWWINDOW);
+
+    // Timer setzen, um Mausbewegungen zu überwachen
+    SetTimer(hwnd, 1, 100, NULL);
+
+    SetForegroundWindow(hwnd);
+    SetFocus(hwnd);
+}
+
+LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    //std::cout << "CustomMenuProc" << std::endl;
+    static std::vector<HWND> buttons;
+
+    switch (uMsg)
+    {
+        case WM_CREATE:
+        {
+            HFONT hFont = CreateFont(
+                -MulDiv(8, GetDeviceCaps(GetDC(hwnd), LOGPIXELSY), 74), // Höhe in Punkten (kleinere Schriftgröße)
+                0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+
+            HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
+            static HICON hIconMinimize = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_MINIMIZE), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+            static HICON hIconArrange = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_ARRANGE), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+            static HICON hIconClose = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_CLOSE), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+
+            int yPos = 10;
+            int buttonID = ID_BUTTON_START;
+            for (const auto& processName : processNames)
+            {
+                HWND hButton1 = CreateWindow(
+                    L"BUTTON",  // Predefined class; Unicode assumed
+                    NULL,  // Kein Text
+                    WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_FLAT | BS_ICON | WS_TABSTOP | BS_CENTER,  // Styles
+                    200,         // x position
+                    yPos-5,        // y position
+                    30,        // Button width
+                    30,        // Button height
+                    hwnd,     // Parent window
+                    (HMENU)MAKEINTRESOURCE(buttonID++),       // Button ID
+                    (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
+                    NULL);      // Pointer not needed.
+
+                HWND hButton2 = CreateWindow(
+                    L"BUTTON",  // Predefined class; Unicode assumed
+                    NULL,  // Kein Text
+                    WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_FLAT | BS_ICON | WS_TABSTOP | BS_CENTER,  // Styles
+                    240,         // x position
+                    yPos-5,        // y position
+                    30,        // Button width
+                    30,        // Button height
+                    hwnd,     // Parent window
+                    (HMENU)MAKEINTRESOURCE(buttonID++),       // Button ID
+                    (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
+                    NULL);      // Pointer not needed.
+
+                HWND hButton3 = CreateWindow(
+                    L"BUTTON",  // Predefined class; Unicode assumed
+                    NULL,  // Kein Text
+                    WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_FLAT | BS_ICON | WS_TABSTOP | BS_CENTER,  // Styles
+                    280,         // x position
+                    yPos-5,        // y position
+                    30,        // Button width
+                    30,        // Button height
+                    hwnd,     // Parent window
+                    (HMENU)MAKEINTRESOURCE(buttonID++),       // Button ID
+                    (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
+                    NULL);      // Pointer not needed.
+
+                SendMessage(hButton1, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconMinimize);
+                SendMessage(hButton2, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconArrange);
+                SendMessage(hButton3, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconClose);
+
+                SendMessage(hButton1, WM_SETFONT, (WPARAM)hFont, TRUE);
+                SendMessage(hButton2, WM_SETFONT, (WPARAM)hFont, TRUE);
+                SendMessage(hButton3, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+                buttons.push_back(hButton1);
+                buttons.push_back(hButton2);
+                buttons.push_back(hButton3);
+                yPos += 30;
+            }
+
+            HWND hQuitMenuButton = CreateWindow(
+                L"BUTTON",  // Predefined class; Unicode assumed
+                L"Quit Menu",    // Button text
+                WS_TABSTOP | WS_VISIBLE | BS_FLAT | WS_CHILD | BS_DEFPUSHBUTTON | BS_CENTER,  // Styles
+                10,         // x position
+                yPos + 30,       // y position (nach der letzten Zeile)
+                100,        // Button width
+                30,         // Button height
+                hwnd,       // Parent window
+                (HMENU)ID_QUITMENU_BUTTON,       // Button ID
+                (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
+                NULL);      // Pointer not needed.
+
+            buttons.push_back(hQuitMenuButton);
+
+            // Erstelle den "Exit"-Button am Ende der Liste
+            HWND hExitButton = CreateWindow(
+                L"BUTTON",  // Predefined class; Unicode assumed
+                L"Exit",    // Button text
+                WS_TABSTOP | WS_VISIBLE | BS_FLAT | WS_CHILD | BS_DEFPUSHBUTTON | BS_CENTER,  // Styles
+                210,         // x position
+                yPos + 30,       // y position (nach der letzten Zeile)
+                100,        // Button width
+                30,         // Button height
+                hwnd,       // Parent window
+                (HMENU)ID_EXIT_BUTTON,       // Button ID
+                (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
+                NULL);      // Pointer not needed.
+
+            buttons.push_back(hExitButton);
+
+            break;
+        }
+
+            case WM_MOUSEMOVE:
+            {
+                POINT pt;
+                GetCursorPos(&pt);
+                ScreenToClient(hwnd, &pt);
+
+                int newLine = pt.y / 30; // Annahme: jede Zeile ist 30 Pixel hoch
+                if (newLine != currentLine)
+                {
+                    currentLine = newLine;
+                    RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+                }
+                break;
+            }
+
+            case WM_SETCURSOR:
+            {
+                SetCursor(LoadCursor(NULL, IDC_ARROW));
+                return TRUE;
+            }
+
+        case WM_PAINT:
+        {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+
+            RECT rect;
+            GetClientRect(hwnd, &rect);
+
+            // Erstellen eines kompatiblen Speicher-DCs
+            HDC memDC = CreateCompatibleDC(hdc);
+            HBITMAP hbmMem = CreateCompatibleBitmap(hdc, rect.right, rect.bottom);
+            HBITMAP hbmOld = (HBITMAP)SelectObject(memDC, hbmMem);
+
+            // Hintergrund füllen
+            FillRect(memDC, &rect, (HBRUSH)(COLOR_MENU + 1));
+
+            // Schriftart setzen
+            HFONT hFont = CreateFont(20, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, 
+                                    OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, 
+                                    DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+            HFONT hOldFont = (HFONT)SelectObject(memDC, hFont);
+
+            int yPos = 10;
+            for (int i = 0; i < processNames.size(); ++i)
+            {
+                auto processName = processNames[i];
+                std::wstring processNameW(processName.begin(), processName.end());
+                processNameW = trim(processNameW);
+                processNameW = capitalizeIfAllCaps(processNameW);
+
+                if (i == currentLine)
+                {
+                    RECT lineRect = {0, yPos - 5, rect.right, yPos - 5 + 30};
+                    FillRect(memDC, &lineRect, (HBRUSH)GetStockObject(LTGRAY_BRUSH));
+                }
+
+                auto it = processIcons.find(processName);
+                if (it != processIcons.end())
+                {
+                    DrawIconEx(memDC, 10, yPos, it->second, 20, 20, 0, NULL, DI_NORMAL);
+                }
+
+                SetBkMode(memDC, TRANSPARENT);
+                TextOut(memDC, 40, yPos, processNameW.c_str(), processNameW.length());
+
+                yPos += 30;
+            }
+
+            // Zeichnen des Speicher-DCs auf den Bildschirm
+            BitBlt(hdc, 0, 0, rect.right, rect.bottom, memDC, 0, 0, SRCCOPY);
+
+            // Aufräumen
+            SelectObject(memDC, hOldFont);
+            DeleteObject(hFont);
+            SelectObject(memDC, hbmOld);
+            DeleteObject(hbmMem);
+            DeleteDC(memDC);
+
+            EndPaint(hwnd, &ps);
+            break;
+        }
+
+        case WM_COMMAND:
+        {
+            int wmId = LOWORD(wParam);
+            int totalButtons = processNames.size() * 3; // Da jeder Prozess drei Buttons hat
+            if (wmId == ID_EXIT_BUTTON)
+            {
+                // Hier können Sie eine Nachricht oder eine Aktion hinzufügen, bevor das Programm beendet wird
+                MessageBox(NULL, L"Are you sure you want to exit the 'Manage Multiple Open Windows' program?", L"Exit Confirmation", MB_OK);
+
+                // Beenden des Programms
+                PostQuitMessage(0);
+            }
+            if (wmId == ID_QUITMENU_BUTTON)
+            {
+                KillTimer(hwnd, 1);
+                DestroyWindow(hwnd);
+            }
+            if (wmId >= ID_BUTTON_START && wmId < ID_BUTTON_START + totalButtons)
+            {
+                int index = (wmId - ID_BUTTON_START) / 3; // Berechnung des Prozess-Index
+                int buttonNumber = (wmId - ID_BUTTON_START) % 3 + 1; // Berechnung der Button-Nummer (1-3)
+                //std::wcout << L"Button " << buttonNumber << L" clicked for process: " << processNames[index] << std::endl;
+                if (buttonNumber == 1)
+                {
+                    int screenWidth = GetSystemMetrics(SM_CXSCREEN);
+                    int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+                    for (auto& entry : processWindowsMap) { // Iterate through all processes
+                        for (auto& window : entry.second) { // Iterate through all windows of a process
+                            if (window.processName == processNames[index]) { // Check if the window is selected
+                                SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
+                                //ProcessMessages(); // Process messages
+                                window.arranged = false; // Setze arranged auf false, nachdem das Fenster vergrößert wurde
+                                ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
+                                ProcessMessages(); // Process messages
+                            }
+                        }
+                    }              
+                }
+                if (buttonNumber == 2)
+                {
+                    int screenIndex = 0; 
+                    std::vector<MonitorInfo> monitors;
+                    EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, (LPARAM)&monitors);
+                    globalScreenIndexChosen++;
+                    if (globalScreenIndexChosen > monitors.size()) globalScreenIndexChosen = 1;
+                    ////std::cout << globalScreenIndexChosen << std::endl;
+                    if (monitors.size() > 1) screenIndex = globalScreenIndexChosen - 1; // Handle move to screen action
+                    RECT screenRect = GetScreenRect(screenIndex);
+                    //RECT rect; // Declaration of a RECT structure
+                    //GetClientRect(hwnd, &rect); // Retrieve the client rectangles of the window
+                    //int screenWidth = GetSystemMetrics(SM_CXSCREEN); // Retrieve the screen width
+                    int screenWidth = screenRect.right - screenRect.left;
+                    int screenHeight = screenRect.bottom - screenRect.top - getTaskbarHeight(hwnd);
+                    //int screenHeight = GetSystemMetrics(SM_CYSCREEN); // Retrieve the screen height
+
+                    int numWindows = 0; // Counter for the number of windows
+                    for (auto& entry : processWindowsMap) { // Iterate through all processes
+                        for (auto& window : entry.second) { // Iterate through all windows of a process
+                            if (window.processName == processNames[index]) { // Check if the window is selected
+                                window.arranged = true; 
+                                numWindows++; // Increment the counter
+                            }
+                        }
+                    }
+
+                    int cols = static_cast<int>(ceil(sqrt(numWindows))); // Calculate the number of columns
+                    int rows = (numWindows + cols - 1) / cols; // Calculate the number of rows
+
+                    int windowWidth = (screenWidth) / cols; // Calculate the window width
+                    int windowHeight = (screenHeight) / rows; // Calculate the window height
+
+                    int x = 0, y = 0; // Initialize the X and Y positions
+                    int maxAdjustedWidth = 0;
+                    numWindows = 0;
+
+                    // Zuerst die Breite des breitesten Fensters ermitteln
+                    for (const auto& entry : processWindowsMap) { // Iterate through all processes
+                        for (const auto& window : entry.second) { // Iterate through all windows of a process
+                            if (window.processName == processNames[index]) { // Check if the window is selected
+                                if (IsIconic(window.hwnd) || IsZoomed(window.hwnd)) ShowWindow(window.hwnd, SW_RESTORE); // Restore the window if minimized or maximized
+                                //SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
+                                MoveWindowToScreen(window.hwnd, screenIndex);
+                                ProcessMessages(); // Process messages
+                                //ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
+                                if (IsIconic(window.hwnd) || IsZoomed(window.hwnd)) ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
+                                SetForegroundWindow(window.hwnd); // Bring the window to the foreground
+                                ProcessMessages(); // Process messages
+                                MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth, windowHeight, TRUE); // Move and resize the window
+                                ProcessMessages(); // Process messages
+                                Sleep(100);
+                                // Größe des klienten Bereichs ermitteln
+                                RECT clientRect;
+                                GetClientRect(window.hwnd, &clientRect);
+                                int clientWidth = clientRect.right - clientRect.left;
+                                int clientHeight = clientRect.bottom - clientRect.top;
+
+                                // Fensterstil und erweiterte Stile ermitteln
+                                DWORD style = GetWindowLong(window.hwnd, GWL_STYLE);
+                                DWORD exStyle = GetWindowLong(window.hwnd, GWL_EXSTYLE);
+
+                                // Anpassung der Fenstergröße basierend auf dem klienten Bereich
+                                RECT adjustedRect = {0, 0, clientWidth, clientHeight};
+                                AdjustWindowRectEx(&adjustedRect, style, FALSE, exStyle);
+
+                                // Berechnete Fenstergröße
+                                int adjustedWidth = adjustedRect.right - adjustedRect.left;
+                                int adjustedHeight = adjustedRect.bottom - adjustedRect.top;
+
+                                // Aktualisiere die maximale Breite
+                                if (adjustedWidth > maxAdjustedWidth) {
+                                    maxAdjustedWidth = adjustedWidth;
+                                }
+
+                                numWindows++; // Increment the counter
+                            }
+                        }
+                    }
+
+                    // Anzahl der Fenster nebeneinander und die Anzahl der Fensterreihen berechnen
+                    cols = screenWidth / maxAdjustedWidth;
+                    rows = (numWindows + cols - 1) / cols;
+                    windowWidth = screenWidth / cols; // Calculate the window width
+                    windowHeight = (screenHeight) / rows; // Calculate the window height
+
+                    // Fenster anordnen
+                    x = 0;
+                    y = 0;
+                    for (const auto& entry : processWindowsMap) { // Iterate through all processes
+                        for (const auto& window : entry.second) { // Iterate through all windows of a process
+                            if (window.processName == processNames[index]) { // Check if the window is selected
+                                MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth, windowHeight, TRUE); // Move and resize the window
+                                ProcessMessages(); // Process messages
+
+                                x += windowWidth; // Increment the X position
+                                if (x >= screenWidth) { // Check if the X position exceeds the screen width
+                                    x = 0; // Reset the X position
+                                    y += windowHeight; // Increment the Y position
+                                }
+                            }
+                        }
+                    }    
+                }
+
+                if (buttonNumber == 3)
+                {
+                    HWND parentHwnd = GetParent(hwnd);
+                    if (ConfirmClose(parentHwnd)) { // Display confirmation dialog
+                        ProcessMessages(); // Process messages
+                        //Sleep(500);
+                        for (const auto& entry : processWindowsMap) { // Iterate through all processes
+                            for (const auto& window : entry.second) { // Iterate through all windows of a process
+                                if (window.processName == processNames[index]) { // Check if the window is selected
+                                    // Fenster in den Vordergrund bringen
+                                    SetForegroundWindow(window.hwnd);
+
+                                    // Tastenkombination Ctrl+S senden
+                                    INPUT inputs[4] = {};
+
+                                    // Ctrl-Taste drücken
+                                    inputs[0].type = INPUT_KEYBOARD;
+                                    inputs[0].ki.wVk = VK_CONTROL;
+
+                                    // S-Taste drücken
+                                    inputs[1].type = INPUT_KEYBOARD;
+                                    inputs[1].ki.wVk = 'S';
+
+                                    // S-Taste loslassen
+                                    inputs[2].type = INPUT_KEYBOARD;
+                                    inputs[2].ki.wVk = 'S';
+                                    inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+
+                                    // Ctrl-Taste loslassen
+                                    inputs[3].type = INPUT_KEYBOARD;
+                                    inputs[3].ki.wVk = VK_CONTROL;
+                                    inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+
+                                    // Eingaben senden
+                                    SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
+                                    PostMessage(window.hwnd, WM_CLOSE, 0, 0); // Close the window
+        
+                                    ProcessMessages(); // Process messages
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        case WM_TIMER:
+        {
+            // Überprüfen, ob die Maus außerhalb des Fensters ist
+            POINT pt;
+            GetCursorPos(&pt);
+            RECT rect;
+            GetWindowRect(hwnd, &rect);
+            if (!PtInRect(&rect, pt))
+            {
+                KillTimer(hwnd, 1);
+                DestroyWindow(hwnd);
+            }
+            /*else
+            {
+                SetForegroundWindow(hwnd);
+                SetFocus(hwnd);
+            }*/
+            break;
+        }
+        default:
+            return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
+    return 0;
+}
+
 // Window procedure
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    //std::cout << "WindowProc" << std::endl;
     static int scrollPos = 0; // Static variable to store the scroll position
     int id; // Variable to store the ID
     static HIMAGELIST hImageList;
@@ -1206,6 +1820,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
     switch (uMsg) { // Check the messages
         case WM_CREATE: {
+            //std::cout << "WM_CREATE" << std::endl;
             CreateTrayIcon(hwnd);
             if (!initialized) {
                 UpdateWindowList(hwnd);
@@ -1216,7 +1831,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             GetClientRect(hwnd, &clientRect);
             int searchBoxWidth = 200; // Breite des Suchfelds
             int searchBoxHeight = 20; // Höhe des Suchfelds
-            int searchBoxX = clientRect.right - searchBoxWidth - getTaskbarHeight(); // Position X des Suchfelds
+            int searchBoxX = clientRect.right - searchBoxWidth - getTaskbarHeight(hwnd); // Position X des Suchfelds
             int searchBoxY = 5; // Position Y des Suchfelds
 
             // Erstellen Sie das Suchfeld
@@ -1292,11 +1907,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
             }
         }
-        SetTimer(hwnd, 1, 500, NULL);
+        SetTimer(hwnd, 1, 250, NULL);
         //InvalidateWindow(hwnd);
         break;
 
         case WM_KEYDOWN:
+            //std::cout << "WM_KEYDOWN" << std::endl;
             if ((wParam == 'F') && (GetKeyState(VK_CONTROL) & 0x8000)) {
                 // Ctrl+F wurde gedrückt
                 SetFocus(hSearchBox);
@@ -1309,6 +1925,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_TIMER: {
+            //std::cout << "WM_KEYDOWN" << std::endl;
             if (wParam == 1) {
                 //DestroyWindow(hwnd);
                 blinkState = !blinkState; // Toggle the blink state
@@ -1324,6 +1941,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_DRAWITEM: { // Message when drawing an item
+            //std::cout << "WM_DRAWITEM" << std::endl;
             /*LPDRAWITEMSTRUCT lpDrawItem = (LPDRAWITEMSTRUCT)lParam; // Draw item structure
             if (lpDrawItem->CtlID >= 3000 && lpDrawItem->CtlID < 3000 + processNames.size()) { // Check the ID
                 std::wstring processName = processNames[lpDrawItem->CtlID - 3000]; // Retrieve the process name
@@ -1347,6 +1965,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_UPDATE_LIST: { // Message to update the list
+            //std::cout << "WM_UPDATE_LIST" << std::endl;
             processWindowsMap.clear(); // Clear the process window map
             processNames.clear(); // Clear the process names
             checkboxState.clear(); // Clear the checkbox state
@@ -1379,6 +1998,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_VSCROLL: {
+            //std::cout << "WM_VSCROLL" << std::endl;
             SCROLLINFO si = {};
             si.cbSize = sizeof(si);
             si.fMask = SIF_ALL;
@@ -1404,9 +2024,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
 
         case WM_ERASEBKGND:
+            //std::cout << "WM_ERASEBKGND" << std::endl;
             return 1; // Hintergrund nicht löschen
 
         case WM_COMMAND: { // Message when a command is executed (e.g., button click)
+            //std::cout << "WM_COMMAND" << std::endl;
             id = LOWORD(wParam); // Extract the command ID from wParam
             //std::wstring message = L"" + std::to_wstring(id);
             //MessageBoxW(hwnd, message.c_str(), L"Debug Info", MB_OK);
@@ -1470,7 +2092,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             // Check if the command ID is one of the specified IDs
             if (id == ID_MINIMIZE || id == ID_MAXIMIZE || id == ID_RESTORE || id == ID_CLOSE || 
                 (id >= ID_ARRANGE && id <= ID_ARRANGE + screenCount) || 
-                (id >= ID_MOVE_TO_SCREEN_BASE && id <= ID_MOVE_TO_SCREEN_BASE + screenCount)) {
+                (id >= ID_MOVE_TO_SCREEN_BASE && id <= ID_MOVE_TO_SCREEN_BASE + screenCount) || id == ID_SAVEANDCLOSE) {
 
                 // Check if at least one window is checked
                 bool isChecked = false;
@@ -1616,6 +2238,63 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     //InvalidateWindow(hwnd);
                     Sleep(100); // Short pause
                 }
+                } else if (id == ID_SAVEANDCLOSE) { // Check if the ID is SAVEANDCLOSE
+                if (ConfirmClose(hwnd)) { // Display confirmation dialog
+                    ProcessMessages(); // Process messages
+                    MinimizeToTray(hwnd); // Minimize the window to the tray
+                    for (const auto& entry : processWindowsMap) { // Iterate through all processes
+                        for (const auto& window : entry.second) { // Iterate through all windows of a process
+                            if (window.checked) { // Check if the window is selected
+                                // Fenster in den Vordergrund bringen
+                                SetForegroundWindow(window.hwnd);
+
+                                // Tastenkombination Ctrl+S senden
+                                INPUT inputs[4] = {};
+
+                                // Ctrl-Taste drücken
+                                inputs[0].type = INPUT_KEYBOARD;
+                                inputs[0].ki.wVk = VK_CONTROL;
+
+                                // S-Taste drücken
+                                inputs[1].type = INPUT_KEYBOARD;
+                                inputs[1].ki.wVk = 'S';
+
+                                // S-Taste loslassen
+                                inputs[2].type = INPUT_KEYBOARD;
+                                inputs[2].ki.wVk = 'S';
+                                inputs[2].ki.dwFlags = KEYEVENTF_KEYUP;
+
+                                // Ctrl-Taste loslassen
+                                inputs[3].type = INPUT_KEYBOARD;
+                                inputs[3].ki.wVk = VK_CONTROL;
+                                inputs[3].ki.dwFlags = KEYEVENTF_KEYUP;
+
+                                // Eingaben senden
+                                SendInput(ARRAYSIZE(inputs), inputs, sizeof(INPUT));
+                                PostMessage(window.hwnd, WM_CLOSE, 0, 0); // Close the window
+    
+                                ProcessMessages(); // Process messages
+                            }
+                        }
+                    }
+                    for (auto& entry : processWindowsMap) { // Iterate through all processes
+                        for (auto& window : entry.second) { // Iterate through all windows of a process
+                            window.checked = false; // Deselect the window
+                        }
+                    }
+                    for (auto& state : checkboxState) { // Iterate through all checkbox states
+                        state.second = false; // Deselect the checkbox
+                    }
+                    for (auto& state : expandedState) { // Iterate through all expanded states
+                        state.second = false; // Collapse the expanded state
+                    }
+                    InvalidateRect(hwnd, NULL, TRUE); // Invalidate and redraw the window
+                    UpdateWindowList(hwnd); // Update the window list
+                    AdjustWindowSize(hwnd); // Adjust the window size
+                    ProcessMessages(); // Process messages
+                    //InvalidateWindow(hwnd);
+                    Sleep(100); // Short pause
+                }
             } else if (id >= ID_ARRANGE && id <= ID_ARRANGE + screenCount) {//else if (id == 2003) { Check if the ID is 2003 (Arrange)
                 MinimizeToTray(hwnd); // Minimize the window to the tray
                 //MessageBoxW(hwnd, L"aha2", L"Debug Info", MB_OK);
@@ -1625,7 +2304,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 //GetClientRect(hwnd, &rect); // Retrieve the client rectangles of the window
                 //int screenWidth = GetSystemMetrics(SM_CXSCREEN); // Retrieve the screen width
                 int screenWidth = screenRect.right - screenRect.left;
-                int screenHeight = screenRect.bottom - screenRect.top;
+                int screenHeight = screenRect.bottom - screenRect.top - getTaskbarHeight(hwnd);
                 //int screenHeight = GetSystemMetrics(SM_CYSCREEN); // Retrieve the screen height
 
                 int numWindows = 0; // Counter for the number of windows
@@ -1642,7 +2321,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 int rows = (numWindows + cols - 1) / cols; // Calculate the number of rows
 
                 int windowWidth = (screenWidth) / cols; // Calculate the window width
-                int windowHeight = (screenHeight - getTaskbarHeight()) / rows; // Calculate the window height
+                int windowHeight = (screenHeight) / rows; // Calculate the window height
 
                 int x = 0, y = 0; // Initialize the X and Y positions
                 int maxAdjustedWidth = 0;
@@ -1695,7 +2374,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 cols = screenWidth / maxAdjustedWidth;
                 rows = (numWindows + cols - 1) / cols;
                 windowWidth = screenWidth / cols; // Calculate the window width
-                windowHeight = (screenHeight - getTaskbarHeight()) / rows; // Calculate the window height
+                windowHeight = (screenHeight) / rows; // Calculate the window height
 
                 // Fenster anordnen
                 x = 0;
@@ -1741,6 +2420,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                  for (const auto& entry : processWindowsMap) { // Iterate through all processes
                     for (const auto& window : entry.second) { // Iterate through all windows of a process
                         if (window.checked) { // Check if the window is selected
+                            if (IsIconic(window.hwnd) || IsZoomed(window.hwnd)) ShowWindow(window.hwnd, SW_RESTORE);
                             MoveWindowToScreen(window.hwnd, screenIndex);
                         }
                     }
@@ -1832,6 +2512,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_LBUTTONDOWN: { // Message when the left mouse button is pressed
+            //std::cout << "WM_LBUTTONDOWN" << std::endl;
             isScrolling = true; // Start scrolling
             SetCapture(hwnd); // Capture the mouse to receive all mouse events
             lastMousePos.x = GET_X_LPARAM(lParam); // Store the X position of the mouse
@@ -1914,27 +2595,36 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         break;
 
-case WM_MENUSELECT: {
-    try {
-        // Löschen Sie die temporären Kacheln bei jeder Menüauswahl
-        ClearTemporaryTiles(hwnd);
+        case WM_MENUSELECT: {
+            //std::cout << "WM_MENUSELECT" << std::endl;
+            ////std::cout << "Beginne WM_MENUSELECT" << std::endl;
+            // Löschen Sie die temporären Kacheln bei jeder Menüauswahl
+            try {
+                ////std::cout << "Vor ClearTemporaryTiles" << std::endl;
+                ClearTemporaryTiles(hwnd);
+                ////std::cout << "Nach ClearTemporaryTiles" << std::endl;
 
-        if (HIWORD(wParam) & MF_MOUSESELECT) {
-            std::vector<MonitorInfo> monitors;
-            if (!EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, reinterpret_cast<LPARAM>(&monitors))) {
-                throw std::runtime_error("EnumDisplayMonitors failed");
-            }
+                if (HIWORD(wParam) & MF_MOUSESELECT) {
+                    std::vector<MonitorInfo> monitors;
+                    ////std::cout << "Vor EnumDisplayMonitors" << std::endl;
+                    if (!EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, reinterpret_cast<LPARAM>(&monitors))) {
+                        throw std::runtime_error("EnumDisplayMonitors failed");
+                    }
+                    ////std::cout << "Nach EnumDisplayMonitors" << std::endl;
 
-            int menuIndex = LOWORD(wParam) - ID_ARRANGE;
-            if (menuIndex >= 0 && menuIndex < monitors.size()) {
-                ShowTemporaryTiles(hwnd, menuIndex);
+                    int menuIndex = LOWORD(wParam) - ID_ARRANGE;
+                    if (menuIndex >= 0 && menuIndex < monitors.size()) {
+                        ////std::cout << "Vor ShowTemporaryTiles" << std::endl;
+                        ShowTemporaryTiles(hwnd, menuIndex);
+                        ////std::cout << "Nach ShowTemporaryTiles" << std::endl;
+                    }
+                }
+            } catch (const std::exception& e) {
+                //std::cout << "Error in WM_MENUSELECT: " << e.what() << std::endl;
             }
+            ////std::cout << "Alles gut bei WM_MENUSELECT bis zum Ende" << std::endl;
         }
-    } catch (const std::exception& e) {
-        MessageBox(hwnd, std::wstring(e.what(), e.what() + strlen(e.what())).c_str(), L"Error", MB_OK);
-    }
-}
-break;
+        break;
 
         /*case WM_MOVE:
         {
@@ -1948,6 +2638,7 @@ break;
         break;*/
 
         case WM_MOUSEMOVE: { // Message when the mouse is moved
+            //std::cout << "WM_MOUSEMOVE" << std::endl;
             if (isScrolling) { // Check if scrolling
                 POINT currentMousePos; // Variable to store the current mouse position
                 currentMousePos.x = GET_X_LPARAM(lParam); // Retrieve the X position of the mouse
@@ -2030,12 +2721,14 @@ break;
         break;
     
         case WM_LBUTTONUP: { // Message when the left mouse button is released
+            //std::cout << "WM_LBUTTONUP" << std::endl;
             isScrolling = false; // Stop scrolling
             ReleaseCapture(); // Release the mouse
         }
         break;
         
         case WM_MOUSEWHEEL: { // Nachricht, wenn das Mausrad gedreht wird
+            //std::cout << "WM_MOUSEWHEEL" << std::endl;
             int delta = GET_WHEEL_DELTA_WPARAM(wParam); // Abrufen der Scroll-Richtung und -Menge
             SCROLLINFO si = {}; // Initialisieren einer SCROLLINFO-Struktur
             si.cbSize = sizeof(si); // Setzen der Größe der Struktur
@@ -2060,6 +2753,7 @@ break;
         break;
                 
         case WM_PAINT: {
+            //std::cout << "WM_PAINT" << std::endl;
             isRedrawPending = false; // Reset the flag
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
@@ -2322,6 +3016,7 @@ break;
         break;
 
         case WM_SIZE: { // Message when the window size is changed
+            //std::cout << "WM_SIZE" << std::endl;
             RECT rect; // Declaration of a RECT structure to store the client rectangles
             GetClientRect(hwnd, &rect); // Retrieve the client rectangles of the window
             SCROLLINFO si = {}; // Initialize a SCROLLINFO structure
@@ -2337,7 +3032,7 @@ break;
             if (wParam == SIZE_MINIMIZED) {
                 KillTimer(hwnd, 1); // Timer stoppen
             } else {
-                SetTimer(hwnd, 1, 500, NULL); // Timer neu starten
+                SetTimer(hwnd, 1, 250, NULL); // Timer neu starten
             }
             // int buttonCount = 4; // Number of buttons
             // int buttonWidth = (width - 20) / buttonCount; // Calculate the width of a button
@@ -2351,6 +3046,7 @@ break;
         break;
 
         case WM_DESTROY: { // Message when the window is destroyed
+            //std::cout << "WM_DESTROY" << std::endl;
             RemoveTrayIcon(hwnd); // Remove the tray icon
             PostQuitMessage(0); // Quit the application
             return 0; // Return 0
@@ -2358,6 +3054,7 @@ break;
         break;
 
         case WM_CLOSE: { // Message when the window is closed
+            //std::cout << "WM_CLOSE" << std::endl;
             //RemoveTrayIcon(hwnd); // Remove the tray icon (commented out)
             //DestroyWindow(hwnd); // Destroy the window (commented out)
             MinimizeToTray(hwnd); // Minimize the window to the tray
@@ -2366,6 +3063,7 @@ break;
         break;
 
         case WM_TRAYICON: { 
+            //std::cout << "WM_CLOSE" << std::endl;
             if (lParam == WM_LBUTTONUP) { 
                 // Call the same functions as in WM_CREATE
                 CreateTrayIcon(hwnd);
@@ -2428,6 +3126,7 @@ break;
         break;
 
         default: { // Default message
+            //std::cout << "default" << std::endl;
             return DefWindowProc(hwnd, uMsg, wParam, lParam); // Call the default window procedure
         }
     }
@@ -2436,6 +3135,7 @@ break;
 
 // Main function
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    //std::cout << "WinMain" << std::endl;
     // Main function for Windows applications
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 

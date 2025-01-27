@@ -1,6 +1,9 @@
 #include "resource.h"
 
 IDI_MYICON ICON "icon.ico"
+IDI_ICON_MINIMIZE ICON "minimize.ico"
+IDI_ICON_ARRANGE ICON "arrange.ico"
+IDI_ICON_CLOSE ICON "close.ico"
 
 IDR_MAINMENU MENU
 BEGIN

@@ -5,3 +5,6 @@
 #define ID_CLOSE    2002
 #define ID_ARRANGE  2003
 #define ID_MOVE_TO_SCREEN_BASE 2104
+#define IDI_ICON_MINIMIZE       3101
+#define IDI_ICON_ARRANGE        3102
+#define IDI_ICON_CLOSE          3103
