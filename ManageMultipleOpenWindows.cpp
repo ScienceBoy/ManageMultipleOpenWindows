@@ -418,7 +418,7 @@ void ShowTemporaryTiles(HWND hwnd, int screenIndex) {
                 throw std::runtime_error("GetDC failed");
             }
 
-            HPEN hPen = CreatePen(PS_SOLID, 1, RGB(0, 0, 255)); // Blauer Stift mit Dicke 1
+            HPEN hPen = CreatePen(PS_SOLID, 5, RGB(0, 0, 255)); // Blauer Stift mit Dicke 1
             if (!hPen) {
                 ReleaseDC(NULL, hdcScreen);
                 throw std::runtime_error("CreatePen failed");
@@ -1257,7 +1257,7 @@ void SearchAndCheck(const std::wstring& searchString, HWND hwnd) {
             }
         }
     }
-    if (searchString != std::wstring(L"Search name (CTRL-F)")  && lowerSearchString.length() >= 1 && !foundAnything)
+    if (searchString != std::wstring(L"\u2315 Search Name (CTRL-F)")  && lowerSearchString.length() >= 1 && !foundAnything)
     {
         ShowWindow(hGoToButton, SW_SHOW);
     }
@@ -1373,7 +1373,7 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
 
     // Fenstergröße festlegen
     int width = 320; // Breite des Fensters
-    int height = 30 * processNames.size() +  getTaskbarHeight(parentHwnd) + 10; // Höhe des Fensters basierend auf der Anzahl der Zeilen
+    int height = 30 * processNames.size() +  getTaskbarHeight(parentHwnd) * 2; // Höhe des Fensters basierend auf der Anzahl der Zeilen
 
     // Position anpassen, um das Fenster innerhalb des sichtbaren Bereichs zu halten
     if (pt.x + width > screenRect.right)
@@ -1410,104 +1410,104 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
     {
         case WM_CREATE:
         {
-            HFONT hFont = CreateFont(
-                -MulDiv(8, GetDeviceCaps(GetDC(hwnd), LOGPIXELSY), 74), // Höhe in Punkten (kleinere Schriftgröße)
-                0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
+                HFONT hFont = CreateFont(
+                    -MulDiv(8, GetDeviceCaps(GetDC(hwnd), LOGPIXELSY), 74), // Höhe in Punkten (kleinere Schriftgröße)
+                    0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                    DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                    CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
 
-            HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
-            static HICON hIconMinimize = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_MINIMIZE), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
-            static HICON hIconArrange = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_ARRANGE), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
-            static HICON hIconClose = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_CLOSE), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+                HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
+                static HICON hIconMinimize = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_MINIMIZE), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+                static HICON hIconArrange = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_ARRANGE), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
+                static HICON hIconClose = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_CLOSE), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR);
 
-            int yPos = 10;
-            int buttonID = ID_BUTTON_START;
-            for (const auto& processName : processNames)
-            {
-                HWND hButton1 = CreateWindow(
+                int yPos = 10;
+                int buttonID = ID_BUTTON_START;
+                for (const auto& processName : processNames)
+                {
+                    HWND hButton1 = CreateWindow(
+                        L"BUTTON",  // Predefined class; Unicode assumed
+                        NULL,  // Kein Text
+                        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_FLAT | BS_ICON | WS_TABSTOP | BS_CENTER,  // Styles
+                        200,         // x position
+                        yPos-5,        // y position
+                        30,        // Button width
+                        30,        // Button height
+                        hwnd,     // Parent window
+                        (HMENU)MAKEINTRESOURCE(buttonID++),       // Button ID
+                        (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
+                        NULL);      // Pointer not needed.
+
+                    HWND hButton2 = CreateWindow(
+                        L"BUTTON",  // Predefined class; Unicode assumed
+                        NULL,  // Kein Text
+                        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_FLAT | BS_ICON | WS_TABSTOP | BS_CENTER,  // Styles
+                        240,         // x position
+                        yPos-5,        // y position
+                        30,        // Button width
+                        30,        // Button height
+                        hwnd,     // Parent window
+                        (HMENU)MAKEINTRESOURCE(buttonID++),       // Button ID
+                        (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
+                        NULL);      // Pointer not needed.
+
+                    HWND hButton3 = CreateWindow(
+                        L"BUTTON",  // Predefined class; Unicode assumed
+                        NULL,  // Kein Text
+                        WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_FLAT | BS_ICON | WS_TABSTOP | BS_CENTER,  // Styles
+                        280,         // x position
+                        yPos-5,        // y position
+                        30,        // Button width
+                        30,        // Button height
+                        hwnd,     // Parent window
+                        (HMENU)MAKEINTRESOURCE(buttonID++),       // Button ID
+                        (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
+                        NULL);      // Pointer not needed.
+
+                    SendMessage(hButton1, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconMinimize);
+                    SendMessage(hButton2, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconArrange);
+                    SendMessage(hButton3, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconClose);
+
+                    SendMessage(hButton1, WM_SETFONT, (WPARAM)hFont, TRUE);
+                    SendMessage(hButton2, WM_SETFONT, (WPARAM)hFont, TRUE);
+                    SendMessage(hButton3, WM_SETFONT, (WPARAM)hFont, TRUE);
+
+                    buttons.push_back(hButton1);
+                    buttons.push_back(hButton2);
+                    buttons.push_back(hButton3);
+                    yPos += 30;
+                }
+
+                HWND hQuitMenuButton = CreateWindow(
                     L"BUTTON",  // Predefined class; Unicode assumed
-                    NULL,  // Kein Text
-                    WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_FLAT | BS_ICON | WS_TABSTOP | BS_CENTER,  // Styles
-                    200,         // x position
-                    yPos-5,        // y position
-                    30,        // Button width
-                    30,        // Button height
-                    hwnd,     // Parent window
-                    (HMENU)MAKEINTRESOURCE(buttonID++),       // Button ID
+                    L"Quit Menu",    // Button text
+                    WS_TABSTOP | WS_VISIBLE | BS_FLAT | WS_CHILD | BS_DEFPUSHBUTTON | BS_CENTER,  // Styles
+                    10,         // x position
+                    yPos + 30,       // y position (nach der letzten Zeile)
+                    100,        // Button width
+                    30,         // Button height
+                    hwnd,       // Parent window
+                    (HMENU)ID_QUITMENU_BUTTON,       // Button ID
                     (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
                     NULL);      // Pointer not needed.
 
-                HWND hButton2 = CreateWindow(
+                buttons.push_back(hQuitMenuButton);
+
+                // Erstelle den "Exit"-Button am Ende der Liste
+                HWND hExitButton = CreateWindow(
                     L"BUTTON",  // Predefined class; Unicode assumed
-                    NULL,  // Kein Text
-                    WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_FLAT | BS_ICON | WS_TABSTOP | BS_CENTER,  // Styles
-                    240,         // x position
-                    yPos-5,        // y position
-                    30,        // Button width
-                    30,        // Button height
-                    hwnd,     // Parent window
-                    (HMENU)MAKEINTRESOURCE(buttonID++),       // Button ID
+                    L"Exit",    // Button text
+                    WS_TABSTOP | WS_VISIBLE | BS_FLAT | WS_CHILD | BS_DEFPUSHBUTTON | BS_CENTER,  // Styles
+                    210,         // x position
+                    yPos + 30,       // y position (nach der letzten Zeile)
+                    100,        // Button width
+                    30,         // Button height
+                    hwnd,       // Parent window
+                    (HMENU)ID_EXIT_BUTTON,       // Button ID
                     (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
                     NULL);      // Pointer not needed.
 
-                HWND hButton3 = CreateWindow(
-                    L"BUTTON",  // Predefined class; Unicode assumed
-                    NULL,  // Kein Text
-                    WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_FLAT | BS_ICON | WS_TABSTOP | BS_CENTER,  // Styles
-                    280,         // x position
-                    yPos-5,        // y position
-                    30,        // Button width
-                    30,        // Button height
-                    hwnd,     // Parent window
-                    (HMENU)MAKEINTRESOURCE(buttonID++),       // Button ID
-                    (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
-                    NULL);      // Pointer not needed.
-
-                SendMessage(hButton1, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconMinimize);
-                SendMessage(hButton2, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconArrange);
-                SendMessage(hButton3, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconClose);
-
-                SendMessage(hButton1, WM_SETFONT, (WPARAM)hFont, TRUE);
-                SendMessage(hButton2, WM_SETFONT, (WPARAM)hFont, TRUE);
-                SendMessage(hButton3, WM_SETFONT, (WPARAM)hFont, TRUE);
-
-                buttons.push_back(hButton1);
-                buttons.push_back(hButton2);
-                buttons.push_back(hButton3);
-                yPos += 30;
-            }
-
-            HWND hQuitMenuButton = CreateWindow(
-                L"BUTTON",  // Predefined class; Unicode assumed
-                L"Quit Menu",    // Button text
-                WS_TABSTOP | WS_VISIBLE | BS_FLAT | WS_CHILD | BS_DEFPUSHBUTTON | BS_CENTER,  // Styles
-                10,         // x position
-                yPos + 30,       // y position (nach der letzten Zeile)
-                100,        // Button width
-                30,         // Button height
-                hwnd,       // Parent window
-                (HMENU)ID_QUITMENU_BUTTON,       // Button ID
-                (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
-                NULL);      // Pointer not needed.
-
-            buttons.push_back(hQuitMenuButton);
-
-            // Erstelle den "Exit"-Button am Ende der Liste
-            HWND hExitButton = CreateWindow(
-                L"BUTTON",  // Predefined class; Unicode assumed
-                L"Exit",    // Button text
-                WS_TABSTOP | WS_VISIBLE | BS_FLAT | WS_CHILD | BS_DEFPUSHBUTTON | BS_CENTER,  // Styles
-                210,         // x position
-                yPos + 30,       // y position (nach der letzten Zeile)
-                100,        // Button width
-                30,         // Button height
-                hwnd,       // Parent window
-                (HMENU)ID_EXIT_BUTTON,       // Button ID
-                (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
-                NULL);      // Pointer not needed.
-
-            buttons.push_back(hExitButton);
+                buttons.push_back(hExitButton);
 
             break;
         }
@@ -1601,11 +1601,18 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             int totalButtons = processNames.size() * 3; // Da jeder Prozess drei Buttons hat
             if (wmId == ID_EXIT_BUTTON)
             {
-                // Hier können Sie eine Nachricht oder eine Aktion hinzufügen, bevor das Programm beendet wird
-                MessageBox(NULL, L"Are you sure you want to exit the 'Manage Multiple Open Windows' program?", L"Exit Confirmation", MB_OK);
+                SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                int result = MessageBox(NULL, L"Are you sure you want to exit the 'Manage Multiple Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST);
 
-                // Beenden des Programms
-                PostQuitMessage(0);
+                if (result == IDYES)
+                {
+                    // Beenden des Programms
+                    PostQuitMessage(0);
+                }
+                else
+                {
+                    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                }
             }
             if (wmId == ID_QUITMENU_BUTTON)
             {
@@ -1839,7 +1846,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                                         searchBoxX, searchBoxY, searchBoxWidth, searchBoxHeight, hwnd, (HMENU)IDC_SEARCHBOX, 
                                         ((LPCREATESTRUCT)lParam)->hInstance, NULL);
             SendMessage(hSearchBox, EM_SETLIMITTEXT, 32, 0); // Begrenze die Eingabe auf 32 Zeichen
-            SetEditPlaceholder(hSearchBox, L"Search name (CTRL-F)"); // Setze den Hint
+            SetEditPlaceholder(hSearchBox, L"\u2315 Search Name (CTRL-F)"); // Setze den Hint
 
             // Erstellen Sie den "Erase"-Button
             hEraseButton = CreateWindowEx(0, TEXT("BUTTON"), L"\u2716", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 
@@ -2046,7 +2053,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 InvalidateRect(hEraseButton, NULL, TRUE);
                 UpdateWindow(hEraseButton);
                 if (GetWindowTextLength(hSearchBox) == 0) {
-                    SetWindowText(hSearchBox, L"Search name (CTRL-F)"); // Setzen Sie hier Ihren Such-Hint-Text ein
+                    SetWindowText(hSearchBox, L"\u2315 Search Name (CTRL-F)"); // Setzen Sie hier Ihren Such-Hint-Text ein
                 }
                 SetFocus(hwnd);
             }
@@ -2059,7 +2066,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 InvalidateRect(hEraseButton, NULL, TRUE);
                 UpdateWindow(hEraseButton);
                 if (GetWindowTextLength(hSearchBox) == 0) {
-                    SetWindowText(hSearchBox, L"Search name (CTRL-F)"); // Setzen Sie hier Ihren Such-Hint-Text ein
+                    SetWindowText(hSearchBox, L"\u2315 Search Name (CTRL-F)"); // Setzen Sie hier Ihren Such-Hint-Text ein
                 }
                 SetFocus(hwnd);
             }
@@ -2339,7 +2346,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             if (IsIconic(window.hwnd) || IsZoomed(window.hwnd)) ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
                             SetForegroundWindow(window.hwnd); // Bring the window to the foreground
                             ProcessMessages(); // Process messages
-                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth, windowHeight, TRUE); // Move and resize the window
+                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth - 10, windowHeight, TRUE); // Move and resize the window
                             ProcessMessages(); // Process messages
                             Sleep(100);
                             // Größe des klienten Bereichs ermitteln
@@ -2494,14 +2501,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             } else if (HIWORD(wParam) == EN_SETFOCUS && LOWORD(wParam) == IDC_SEARCHBOX) {
                 wchar_t text[256];
                 GetWindowText(hSearchBox, text, 256);
-                if (wcscmp(text, L"Search name (CTRL-F)") == 0) {
+                if (wcscmp(text, L"\u2315 Search Name (CTRL-F)") == 0) {
                     SetWindowText(hSearchBox, L"");
                 }
             } else if (HIWORD(wParam) == EN_KILLFOCUS && LOWORD(wParam) == IDC_SEARCHBOX) {
                 wchar_t text[256];
                 GetWindowText(hSearchBox, text, 256);
                 if (wcslen(text) == 0) {
-                    SetEditPlaceholder(hSearchBox, L"Search name (CTRL-F)");
+                    SetEditPlaceholder(hSearchBox, L"\u2315 Search Name (CTRL-F)");
                 }
             } else if (HIWORD(wParam) == EN_CHANGE && LOWORD(wParam) == IDC_SEARCHBOX) {
                 wchar_t searchString[256];
@@ -2528,7 +2535,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             HFONT hOldFont = (HFONT)SelectObject(hdc, hFont); // Select the new font and save the old font
             for (size_t i = 0; i < processNames.size(); ++i) {
                 const auto& processName = processNames[i];
-                RECT rect = { 50, yPos, textWidth, yPos + 30 };
+                RECT rect = { 30, yPos, textWidth, yPos + 30 };
                 //MessageBoxW(hwnd, (L"yPos: " + std::to_wstring(yPos)).c_str(), L"Info", MB_OK | MB_ICONINFORMATION);
                 if (PtInRect(&rect, pt)) {
                     checkboxState[processName] = !checkboxState[processName];
@@ -2817,7 +2824,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     DeleteObject(hFontBold);
                 }
 
-                std::wstring textBeforeProcessName = expandedState[processName] ? L"\u25BC        " : L"\u25B6        "; // Set the button text
+                std::wstring textBeforeProcessName = expandedState[processName] ? L"\u25BC " : L"\u25B6 "; // Set the button text
 
                 if (AlreadyOneChecked == windows.size()) {
                     textBeforeProcessName += L" "; // Platzhalter für das Quadrat
@@ -2828,7 +2835,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         textBeforeProcessName += L" "; // Platzhalter für das Zeichen \u25EA
                     }
                 } else {
-                    textBeforeProcessName += checkboxState[processName] ? L" " : L"\u2610 "; // Platzhalter für das Quadrat
+                    if (i == highlightedRow && highlightedWindowRow == -1) textBeforeProcessName += checkboxState[processName] ? L" " : L"\u2610 "; // Platzhalter für das Quadrat
                 }
 
                 std::wstring textAfterProcessName = L" (" + std::to_wstring(AlreadyOneChecked) + L" / " + std::to_wstring(windows.size()) + L")";
@@ -2890,7 +2897,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
 
                 // Icon des Prozesses zeichnen
-                DrawIconEx(hdcMem, rect.left + 25, yPos + 5, processIcons[processName], 20, 20, 0, NULL, DI_NORMAL);
+                DrawIconEx(hdcMem, rect.left + 45, yPos + 5, processIcons[processName], 20, 20, 0, NULL, DI_NORMAL);
 
                 // Berechnen Sie die Breite des vorherigen Textes
                 SIZE size;
@@ -2945,8 +2952,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     for (size_t j = 0; j < windows.size(); ++j) {
                         const auto& window = windows[j];
                         if (window.visible || window.checked) {
-                            std::wstring windowText = std::wstring(window.checked ? L"\u25A0 " : L"\u2610 ") + std::wstring(window.title.begin(), window.title.end());
+                            //std::wstring windowText = std::wstring(window.checked ? L"\u25A0 " : L"\u2610 ") + std::wstring(window.title.begin(), window.title.end());
                             RECT windowRect = { 90, yPos, textWidth, yPos + 30 };
+
+                            std::wstring windowText = std::wstring(L"    ") + std::wstring(window.title.begin(), window.title.end());
+
+                            if (i*100000+j == highlightedWindowRow || window.checked) windowText = std::wstring(window.checked ? L"\u25A0 " : L"\u2610 ") + std::wstring(window.title.begin(), window.title.end());
 
                             if (i*100000+j == highlightedWindowRow) {
                                 HBRUSH highlightBrush = CreateSolidBrush(RGB(224, 224, 224)); // Hellgrau
@@ -3156,7 +3167,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         0, // Extended window style
         CLASS_NAME, // Name of the window class
         windowTitle.c_str(), // Window title
-        WS_OVERLAPPED | WS_SYSMENU | WS_VSCROLL | WS_EX_COMPOSITED, // Window style
+        WS_OVERLAPPED | WS_SYSMENU | WS_VSCROLL | WS_EX_COMPOSITED, // Window style. 
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, // Position and size of the window
         NULL, // No parent window
         NULL, // No menu
