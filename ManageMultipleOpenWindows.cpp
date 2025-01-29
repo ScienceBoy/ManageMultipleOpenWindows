@@ -17,17 +17,18 @@
 #include <map>
 #include <shellapi.h>
 #include <winuser.h>
+#include <stdexcept>
 
 #pragma comment(lib, "psapi.lib") // Link psapi.lib library
 
-//extern "C" UINT GetDpiForWindow(HWND hwnd);
+extern "C" UINT GetDpiForWindow(HWND hwnd);
 // Manuelle Deklaration der Typdefinition und der Funktion
-//typedef HANDLE DPI_AWARENESS_CONTEXT;
+typedef HANDLE DPI_AWARENESS_CONTEXT;
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((DPI_AWARENESS_CONTEXT)-4)
 #endif
 
-//extern "C" BOOL SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT value);
+extern "C" BOOL SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT value);
 
 #define WM_TRAYICON (WM_USER + 1) // Define a custom message for the tray icon
 #define WM_UPDATE_LIST (WM_USER + 2) // Define a custom message to update the window list
@@ -94,6 +95,7 @@ void SaveCurrentWindows(); // Function to save the current windows
 bool HasWindowsChanged(); // Function to check if the windows have changed
 bool ConfirmClose(HWND hwnd); // Function to confirm closing windows
 RECT GetScreenRect(int screenIndex);
+void ShowTemporaryTiles(HWND hwnd, int screenIndex);
 BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData);
 
 // Global variables
@@ -123,6 +125,10 @@ static int defaultXPos = 0;
 bool blinkState = false; // Globale Variable für den Blinkzustand
 int globalScreenIndexChosen = 1;
 int currentLine = -1;
+int globalTotalChecked = 0;
+HWND hwndOverlay = NULL; // Globale Variable zum Speichern des Overlay-Fenster-Handles
+HANDLE hThread = NULL;
+bool g_bThreadRunning = true;
 
 HWND hwndTT;
 HWND hSearchBox;
@@ -303,21 +309,25 @@ BOOL CALLBACK RedrawWindowCallback(HWND hwnd, LPARAM lParam) {
     return TRUE;
 }
 
-void ClearTemporaryTiles(HWND hwnd) {
-    ////std::cout << "ClearTemporaryTiles" << std::endl;
-    HDC hdcScreen = GetDC(NULL); // HDC für den gesamten Bildschirm
-    if (!hdcScreen) {
-        throw std::runtime_error("GetDC failed");
+void ClearTemporaryTiles() {
+    if (hThread != NULL) {
+        // Setzen Sie das Flag, um den Thread zu beenden
+        g_bThreadRunning = false;
+
+        // Senden Sie WM_QUIT an den Thread
+        PostThreadMessage(GetThreadId(hThread), WM_QUIT, 0, 0);
+
+        // Warten, bis der Thread beendet ist
+        WaitForSingleObject(hThread, INFINITE);
+        CloseHandle(hThread);
+        hThread = NULL;
     }
 
-    // Löschen Sie die Kacheln, indem Sie den Bildschirmbereich neu zeichnen
-    InvalidateRect(hwnd, NULL, TRUE);
-    UpdateWindow(hwnd);
-
-    // Aktualisieren Sie alle Fenster unter den Kacheln
-    EnumWindows(RedrawWindowCallback, 0);
-
-    ReleaseDC(NULL, hdcScreen);
+    // Fenster zerstören
+    if (hwndOverlay != NULL) {
+        DestroyWindow(hwndOverlay);
+        hwndOverlay = NULL;
+    }
 }
 
 void DrawRectangleWithScaling(HDC hdc, HWND hwnd, RECT screenRect, int x, int y, int windowWidth, int windowHeight) {
@@ -340,127 +350,194 @@ void DrawRectangleWithScaling(HDC hdc, HWND hwnd, RECT screenRect, int x, int y,
     Rectangle(hdc, tileRect.left, tileRect.top, tileRect.right, tileRect.bottom);
 }
 
+LRESULT CALLBACK OverlayWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            // Zeichnen Sie hier die Tiles
+            RECT rect;
+            GetClientRect(hwnd, &rect);
+
+            // Beispielhafte Zeichnung der Tiles
+            HPEN hPen = CreatePen(PS_SOLID, 5, RGB(0, 0, 255));
+            HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
+            HBRUSH hBrush = (HBRUSH)GetStockObject(NULL_BRUSH);
+            HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hBrush);
+
+            int numWindows = globalTotalChecked;
+            int cols = static_cast<int>(ceil(sqrt(numWindows)));
+            int rows = (numWindows + cols - 1) / cols;
+            int windowWidth = (rect.right - rect.left) / cols;
+            int windowHeight = (rect.bottom - rect.top) / rows;
+
+            int x = 0, y = 0;
+            for (int counter = 0; counter < numWindows; counter++) {
+                RECT tileRect = {rect.left + x, rect.top + y, rect.left + x + windowWidth - 10, rect.top + y + windowHeight - 10};
+                Rectangle(hdc, tileRect.left, tileRect.top, tileRect.right, tileRect.bottom);
+
+                x += windowWidth;
+                if (x >= rect.right - 20) {
+                    x = 0;
+                    y += windowHeight;
+                }
+            }
+
+            SelectObject(hdc, hOldPen);
+            SelectObject(hdc, hOldBrush);
+            DeleteObject(hPen);
+
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
+        default:
+            return DefWindowProc(hwnd, uMsg, wParam, lParam);
+    }
+}
+
 void ShowTemporaryTiles(HWND hwnd, int screenIndex) {
-    ////std::cout << "ShowTemporaryTiles" << std::endl;
     try {
         RECT screenRect = GetScreenRect(screenIndex);
         int screenWidth = screenRect.right - screenRect.left;
         int screenHeight = screenRect.bottom - screenRect.top - getTaskbarHeight(hwnd);
-        //////std::cout << "screenWidth: " << screenWidth << std::endl;
 
-        int numWindows = 0; // Counter for the number of windows
-        for (auto& entry : processWindowsMap) { // Iterate through all processes
-            for (auto& window : entry.second) { // Iterate through all windows of a process
-                if (window.checked) { // Check if the window is selected
-                    window.arranged = true; 
-                    numWindows++; // Increment the counter
-                }
-            }
-        }
-        //////std::cout << "numWindows: " << numWindows << std::endl;
+        int numWindows = globalTotalChecked;
 
-        if (numWindows > 0) 
-        {
-            int cols = static_cast<int>(ceil(sqrt(numWindows))); // Calculate the number of columns
-            int rows = (numWindows + cols - 1) / cols; // Calculate the number of rows
-            //////std::cout << "cols: " << cols << std::endl;
-            //////std::cout << "rows: " << rows << std::endl;
-            int windowWidth = (screenWidth) / cols; // Calculate the window width
-            int windowHeight = (screenHeight) / rows; // Calculate the window height
-            //////std::cout << "windowWidth: " << windowWidth << std::endl;
+        if (numWindows > 0) {
+            int cols = static_cast<int>(ceil(sqrt(numWindows)));
+            int rows = (numWindows + cols - 1) / cols;
+            int windowWidth = screenWidth / cols;
+            int windowHeight = screenHeight / rows;
 
-            int x = 0, y = 0; // Initialize the X and Y positions
-            /*int maxAdjustedWidth = 0;
-            numWindows = 0;
-
-            // Zuerst die Breite des breitesten Fensters ermitteln
-            for (const auto& entry : processWindowsMap) { // Iterate through all processes
-                for (const auto& window : entry.second) { // Iterate through all windows of a process
-                    if (window.checked) { // Check if the window is selected
-                        // Größe des klienten Bereichs ermitteln
-                        RECT clientRect;
-                        GetClientRect(window.hwnd, &clientRect);
-                        int clientWidth = clientRect.right - clientRect.left;
-                        int clientHeight = clientRect.bottom - clientRect.top;
-
-                        // Fensterstil und erweiterte Stile ermitteln
-                        DWORD style = GetWindowLong(window.hwnd, GWL_STYLE);
-                        DWORD exStyle = GetWindowLong(window.hwnd, GWL_EXSTYLE);
-
-                        // Anpassung der Fenstergröße basierend auf dem klienten Bereich
-                        RECT adjustedRect = {0, 0, clientWidth, clientHeight};
-                        AdjustWindowRectEx(&adjustedRect, style, FALSE, exStyle);
-
-                        // Berechnete Fenstergröße
-                        int adjustedWidth = adjustedRect.right - adjustedRect.left;
-                        int adjustedHeight = adjustedRect.bottom - adjustedRect.top;
-
-                        // Aktualisiere die maximale Breite
-                        if (adjustedWidth > maxAdjustedWidth) {
-                            maxAdjustedWidth = adjustedWidth;
-                        }
-
-                        numWindows++; // Increment the counter
-                    }
-                }
-            }
-
-            if (numWindows == 0) {
-                return; // Keine Fenster zum Anordnen
-                //maxAdjustedWidth = windowWidth;
-            }
-
-            cols = screenWidth / maxAdjustedWidth;
-            rows = (numWindows + cols - 1) / cols;
-            windowWidth = screenWidth / cols;
-            windowHeight = (screenHeight - 50) / rows;*/
-
-            HDC hdcScreen = GetDC(NULL); // HDC für den gesamten Bildschirm
+            HDC hdcScreen = GetDC(hwnd);
             if (!hdcScreen) {
                 throw std::runtime_error("GetDC failed");
             }
 
-            HPEN hPen = CreatePen(PS_SOLID, 5, RGB(0, 0, 255)); // Blauer Stift mit Dicke 1
-            if (!hPen) {
-                ReleaseDC(NULL, hdcScreen);
-                throw std::runtime_error("CreatePen failed");
-            }
-
+            HPEN hPen = CreatePen(PS_SOLID, 5, RGB(0, 0, 255));
             HPEN hOldPen = (HPEN)SelectObject(hdcScreen, hPen);
-            if (!hOldPen) {
-                DeleteObject(hPen);
-                ReleaseDC(NULL, hdcScreen);
-                throw std::runtime_error("SelectObject failed");
-            }
-
-            HBRUSH hBrush = (HBRUSH)GetStockObject(NULL_BRUSH); // Kein Füllpinsel
+            HBRUSH hBrush = (HBRUSH)GetStockObject(NULL_BRUSH);
             HBRUSH hOldBrush = (HBRUSH)SelectObject(hdcScreen, hBrush);
 
-            x = 0, y = 0;
-            for (const auto& entry : processWindowsMap) { // Iterate through all processes
-                for (const auto& window : entry.second) { // Iterate through all windows of a process
-                    if (window.checked) { // Check if the window is selected
-                        RECT tileRect = {screenRect.left + x, screenRect.top + y, screenRect.left + x + windowWidth, screenRect.top + y + windowHeight};
-                        Rectangle(hdcScreen, tileRect.left, tileRect.top, tileRect.right, tileRect.bottom);
-                        //DrawRectangleWithScaling(hdcScreen, hwnd, screenRect, x, y, windowWidth, windowHeight);
+            int x = 0, y = 0;
+            for (int counter = 0; counter < numWindows; counter++) {
+                RECT tileRect = {screenRect.left + x, screenRect.top + y, screenRect.left + x + windowWidth - 10, screenRect.top + y + windowHeight - 10};
+                Rectangle(hdcScreen, tileRect.left, tileRect.top, tileRect.right, tileRect.bottom);
 
-                        x += windowWidth;
-                        if (x >= screenWidth) {
-                            x = 0;
-                            y += windowHeight;
-                        }
-                    }
+                x += windowWidth;
+                if (x >= screenWidth - 20) {
+                    x = 0;
+                    y += windowHeight;
                 }
             }
+
             SelectObject(hdcScreen, hOldPen);
             SelectObject(hdcScreen, hOldBrush);
             DeleteObject(hPen);
-            ReleaseDC(NULL, hdcScreen);
+            ReleaseDC(hwnd, hdcScreen);
 
-            SetForegroundWindow(hwnd); // Bringe das Programmfenster in den Vordergrund
+            SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            SetForegroundWindow(hwnd);
         }
     } catch (const std::exception& e) {
         MessageBox(hwnd, std::wstring(e.what(), e.what() + strlen(e.what())).c_str(), L"Error in ShowTemporaryTiles", MB_OK);
+    }
+}
+
+DWORD WINAPI ShowTemporaryTilesThread(LPVOID lpParam) {
+    auto params = static_cast<std::pair<HWND, int>*>(lpParam);
+
+    const wchar_t CLASS_NAME[] = L"OverlayWindowClass";
+    WNDCLASS wc = {};
+    wc.lpfnWndProc = OverlayWindowProc;
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = CLASS_NAME;
+    wc.hbrBackground = (HBRUSH)GetStockObject(NULL_BRUSH);
+
+    RegisterClass(&wc);
+
+    // Holen Sie sich die Bildschirmkoordinaten für den angegebenen Bildschirm
+    RECT screenRect = GetScreenRect(params->second);
+    int screenWidth = screenRect.right - screenRect.left;
+    int screenHeight = screenRect.bottom - screenRect.top;
+
+    // Debug-Ausgaben
+    /*std::wcout << L"Screen Index: " << params->second << std::endl;
+    std::wcout << L"Screen Rect: (" << screenRect.left << L", " << screenRect.top << L") - ("
+               << screenRect.right << L", " << screenRect.bottom << L")" << std::endl;
+    std::wcout << L"Screen Width: " << screenWidth << L", Screen Height: " << screenHeight << std::endl;*/
+
+    // Erstellen Sie das Overlay-Fenster mit den richtigen Koordinaten und Abmessungen
+    hwndOverlay = CreateWindowEx(
+        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TRANSPARENT,
+        CLASS_NAME,
+        L"Overlay",
+        WS_POPUP,
+        screenRect.left, screenRect.top, screenWidth, screenHeight,
+        NULL,
+        NULL,
+        GetModuleHandle(NULL),
+        NULL
+    );
+
+    if (hwndOverlay == NULL) {
+        delete params;
+        throw std::runtime_error("CreateWindowEx failed");
+    }
+
+    // Setzen Sie die Transparenz des Overlay-Fensters
+    SetLayeredWindowAttributes(hwndOverlay, RGB(0, 0, 0), 0, LWA_COLORKEY);
+
+    ShowWindow(hwndOverlay, SW_SHOW);
+    UpdateWindow(hwndOverlay);
+
+    // Stellen Sie sicher, dass das Overlay-Fenster auf dem richtigen Bildschirm positioniert ist
+    SetWindowPos(hwndOverlay, HWND_TOPMOST, screenRect.left, screenRect.top, screenWidth, screenHeight, SWP_SHOWWINDOW);
+
+    // Debug-Ausgabe für die Fensterposition
+    RECT overlayRect;
+    GetWindowRect(hwndOverlay, &overlayRect);
+    /*std::wcout << L"Overlay Window Rect: (" << overlayRect.left << L", " << overlayRect.top << L") - ("
+               << overlayRect.right << L", " << overlayRect.bottom << L")" << std::endl;*/
+
+    // Erzwingen Sie das Neuzeichnen des Fensters
+    RedrawWindow(hwndOverlay, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW);
+
+    MSG msg = {};
+    while (g_bThreadRunning) {
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_QUIT) {
+                g_bThreadRunning = false;
+            } else {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
+        }
+    }
+
+    delete params;
+    return 0;
+}
+
+
+void StartShowTemporaryTilesInThread(HWND hwnd, int screenIndex) {
+    g_bThreadRunning = true;
+    auto params = new std::pair<HWND, int>(hwnd, screenIndex);
+    hThread = CreateThread(
+        NULL,
+        0,
+        ShowTemporaryTilesThread,
+        params,
+        0,
+        NULL
+    );
+
+    if (hThread == NULL) {
+        delete params;
+        throw std::runtime_error("CreateThread failed");
     }
 }
 
@@ -1687,8 +1764,16 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                             if (IsIconic(window.hwnd) || IsZoomed(window.hwnd)) ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
                             SetForegroundWindow(window.hwnd); // Bring the window to the foreground
                             ProcessMessages(); // Process messages
-                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, 50, 50, TRUE); // Move and resize the window
+                            //MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, 50, 50, TRUE); // Move and resize the window
+                            //ProcessMessages(); // Process messages
+                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth, windowHeight, TRUE); // Move and resize the window
                             ProcessMessages(); // Process messages
+
+                            /*x += windowWidth; // Increment the X position
+                            if (x >= screenWidth) { // Check if the X position exceeds the screen width
+                                x = 0; // Reset the X position
+                                y += windowHeight; // Increment the Y position
+                            }*/
                             Sleep(100);
                             // Größe des klienten Bereichs ermitteln
                             RECT clientRect;
@@ -1724,7 +1809,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 //std::cout << "minAdjustedWidth: " << minAdjustedWidth << std::endl;
                 //std::cout << "cols: " << cols << std::endl;
                 // Anzahl der Fenster nebeneinander und die Anzahl der Fensterreihen berechnen
-                cols = screenWidth / std::max(minAdjustedWidth, screenWidth/cols);
+                cols = screenWidth / std::max(maxAdjustedWidth, screenWidth/cols);
                 //std::cout << "cols: " << cols << std::endl;                
                 rows = (numWindows + cols - 1) / cols;
                 windowWidth = screenWidth / cols; // Calculate the window width
@@ -2308,6 +2393,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             } else if (id >= ID_ARRANGE && id <= ID_ARRANGE + screenCount) {//else if (id == 2003) { Check if the ID is 2003 (Arrange)
                 MinimizeToTray(hwnd); // Minimize the window to the tray
                 //MessageBoxW(hwnd, L"aha2", L"Debug Info", MB_OK);
+                ClearTemporaryTiles();
                 int screenIndex = (id - ID_ARRANGE) ; // Handle move to screen action
                 RECT screenRect = GetScreenRect(screenIndex);
                 //RECT rect; // Declaration of a RECT structure
@@ -2351,8 +2437,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             if (IsIconic(window.hwnd) || IsZoomed(window.hwnd)) ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
                             SetForegroundWindow(window.hwnd); // Bring the window to the foreground
                             ProcessMessages(); // Process messages
-                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, 50, 50, TRUE); // Move and resize the window
+                            //MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, 50, 50, TRUE); // Move and resize the window
+                            //ProcessMessages(); // Process messages
+                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth, windowHeight, TRUE); // Move and resize the window
                             ProcessMessages(); // Process messages
+
+                            x += windowWidth; // Increment the X position
+                            if (x >= screenWidth) { // Check if the X position exceeds the screen width
+                                x = 0; // Reset the X position
+                                y += windowHeight; // Increment the Y position
+                            }
                             Sleep(100);
                             // Größe des klienten Bereichs ermitteln
                             RECT clientRect;
@@ -2388,7 +2482,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 ////std::cout << "minAdjustedWidth: " << minAdjustedWidth << std::endl;
                 ////std::cout << "cols: " << cols << std::endl;
                 // Anzahl der Fenster nebeneinander und die Anzahl der Fensterreihen berechnen
-                cols = screenWidth / std::max(minAdjustedWidth, screenWidth/cols);
+                cols = screenWidth / std::max(maxAdjustedWidth, screenWidth/cols);
                 ////std::cout << "cols: " << cols << std::endl;                
                 rows = (numWindows + cols - 1) / cols;
                 windowWidth = screenWidth / cols; // Calculate the window width
@@ -2619,7 +2713,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             // Löschen Sie die temporären Kacheln bei jeder Menüauswahl
             try {
                 //////std::cout << "Vor ClearTemporaryTiles" << std::endl;
-                ClearTemporaryTiles(hwnd);
+                ClearTemporaryTiles();
                 //////std::cout << "Nach ClearTemporaryTiles" << std::endl;
 
                 if (HIWORD(wParam) & MF_MOUSESELECT) {
@@ -2633,7 +2727,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     int menuIndex = LOWORD(wParam) - ID_ARRANGE;
                     if (menuIndex >= 0 && menuIndex < monitors.size()) {
                         //////std::cout << "Vor ShowTemporaryTiles" << std::endl;
-                        ShowTemporaryTiles(hwnd, menuIndex);
+                        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                        StartShowTemporaryTilesInThread(hwnd, menuIndex);
                         //////std::cout << "Nach ShowTemporaryTiles" << std::endl;
                     }
                 }
@@ -3000,6 +3095,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             }
 
             std::wstring windowTitle = L"Manage Multiple Open Windows - Total Windows Selected: " + std::to_wstring(TotalChecked);
+            globalTotalChecked = TotalChecked;
             SetWindowText(hwnd, windowTitle.c_str());
 
             // Scroll-Informationen aktualisieren
