@@ -56,6 +56,7 @@ extern "C" BOOL SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT value);
 #define ID_EXIT_IMAGE           3600
 #define ID_FILE_EXIT            2060
 #define ID_SIZE_MINIMIZE        2070
+#define HOTKEY_ID               9999
 
 // Struktur zur Speicherung der Timer-IDs und ihrer Intervalle
 struct TimerInfo {
@@ -2239,6 +2240,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     static HICON hIcon1;
     static HMENU hMenu = NULL;
 
+    std::cout << "uMsg:" << uMsg << std::endl;
+
     switch (uMsg) { // Check the messages
         case WM_CREATE: {
             ////std::cout << "WM_CREATE" << std::endl;
@@ -2332,17 +2335,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         //InvalidateWindow(hwnd);
         break;
 
-        case WM_KEYDOWN:
-            ////std::cout << "WM_KEYDOWN" << std::endl;
+        case WM_KEYDOWN: {
+            std::cout << "WM_KEYDOWN" << std::endl;
             if ((wParam == 'F') && (GetKeyState(VK_CONTROL) & 0x8000)) {
-                // Ctrl+F wurde gedrückt
+                // Ctrl+F was pressed
                 SetFocus(hSearchBox);
-                SendMessage(hSearchBox, EM_SETSEL, 0, -1); // Markieren Sie den gesamten Text im Suchfeld
+                SendMessage(hSearchBox, EM_SETSEL, 0, -1); // Select all text in the search box
                 return 0;
             /*} else if (wParam == VK_ESCAPE) {
-                // ESC-Taste wurde gedrückt
+                // ESC key was pressed
                 wParam = IDC_ERASEBUTTON;*/
             }
+        }
         break;
 
         case WM_TIMER: {
@@ -3515,6 +3519,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_DESTROY: { // Message when the window is destroyed
             ////std::cout << "WM_DESTROY" << std::endl;
+            UnregisterHotKey(NULL, HOTKEY_ID);
             RemoveTrayIcon(hwnd); // Remove the tray icon
             PostQuitMessage(0); // Quit the application
             return 0; // Return 0
@@ -3522,7 +3527,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_CLOSE: { // Message when the window is closed
-            ////std::cout << "WM_CLOSE" << std::endl;
+            std::cout << "WM_CLOSE" << std::endl;
             //RemoveTrayIcon(hwnd); // Remove the tray icon (commented out)
             //DestroyWindow(hwnd); // Destroy the window (commented out)
             MinimizeToTray(hwnd); // Minimize the window to the tray
@@ -3530,9 +3535,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         break;
 
-        case WM_TRAYICON: { 
-            ////std::cout << "WM_CLOSE" << std::endl;
-            if (lParam == WM_LBUTTONUP) { 
+        case WM_TRAYICON:
+        case WM_HOTKEY: { 
+            std::cout << "WM_HOTKEY or WM_TRAYICON" << std::endl;
+            if (uMsg == WM_HOTKEY && wParam != HOTKEY_ID) {
+                std::cout << "Incorrect hotkey ID" << std::endl;
+                break; // Ensure it's the correct hotkey
+            }
+            if (lParam == WM_LBUTTONUP || uMsg == WM_HOTKEY) { 
+                std::cout << "Restoring window" << std::endl;
                 // Call the same functions as in WM_CREATE
                 CreateTrayIcon(hwnd);
                 UpdateWindowList(hwnd);
@@ -3589,6 +3600,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 //Sleep(150);
                 SetForegroundWindow(hwnd); 
                 InvalidateWindow(hwnd);
+                ProcessMessages();
             } else if (lParam == WM_RBUTTONUP) { 
                 ShowTrayMenu(hwnd); 
             }
@@ -3647,6 +3659,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return 0; // Return 0 if the window could not be created
     }
 
+    // Register the hotkey (CTRL+SHIFT+M)
+    if (!RegisterHotKey(hwnd, HOTKEY_ID, MOD_CONTROL | MOD_SHIFT, 'M')) {
+        std::cout << "Failed to register hotkey" << std::endl;
+        return 1;
+    } else {
+        std::cout << "Hotkey registered successfully" << std::endl;
+    }
+    
     HICON hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MYICON)); // Load the window icon
     SendMessage(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)hIcon); // Set the small window icon
     SendMessage(hwnd, WM_SETICON, ICON_BIG, (LPARAM)hIcon); // Set the large window icon
@@ -3655,10 +3675,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     UpdateWindow(hwnd); // Update the window
 
     MSG msg = {}; // Initialize a MSG structure
-    while (GetMessage(&msg, NULL, 0, 0)) { // Message loop
-        TranslateMessage(&msg); // Translate the message (e.g., keyboard input)
-        DispatchMessage(&msg); // Send the message to the window procedure
+    while (GetMessage(&msg, NULL, 0, 0)) {
+        std::cout << "Message received: " << msg.message << std::endl;
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
     }
+
+    UnregisterHotKey(NULL, HOTKEY_ID);
 
     return 0; // Return 0 when the application exits
 }
