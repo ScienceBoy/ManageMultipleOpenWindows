@@ -15,3 +15,4 @@ BEGIN
         MENUITEM "Close Selected Windows", ID_CLOSE
     END
 END
+

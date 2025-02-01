@@ -8,3 +8,4 @@
 #define IDI_ICON_MINIMIZE       3101
 #define IDI_ICON_ARRANGE        3102
 #define IDI_ICON_CLOSE          3103
+#define IDD_WARNING_DIALOG      3700

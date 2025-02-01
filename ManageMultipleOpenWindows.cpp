@@ -18,7 +18,8 @@
 #include <shellapi.h>
 #include <winuser.h>
 #include <stdexcept>
-
+#include <dwmapi.h>
+#pragma comment(lib, "Dwmapi.lib")
 #pragma comment(lib, "psapi.lib") // Link psapi.lib library
 
 extern "C" UINT GetDpiForWindow(HWND hwnd);
@@ -43,15 +44,24 @@ extern "C" BOOL SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT value);
 #define ID_MOVE_TO_SCREEN_BASE  2104
 #define ID_SAVEANDCLOSE         2200
 #define ID_BUTTON_START         2300
+#define ID_PROCESSNAMESTART     3000
 #define IDI_ICON_MINIMIZE       3101
 #define IDI_ICON_ARRANGE        3102
 #define IDI_ICON_CLOSE          3103
 #define ID_EXIT_BUTTON          3200 
+#define ID_CLOSE_PROGRAMM       3250
 #define ID_QUITMENU_BUTTON      3300
 #define ID_IMAGE_START          3400
 #define ID_QUITMENU_IMAGE       3500
 #define ID_EXIT_IMAGE           3600
+#define ID_FILE_EXIT            2060
+#define ID_SIZE_MINIMIZE        2070
 
+// Struktur zur Speicherung der Timer-IDs und ihrer Intervalle
+struct TimerInfo {
+    UINT_PTR id;
+    int interval;
+};
 
 // Structure to store window information
 struct WindowInfo {
@@ -69,13 +79,6 @@ struct MonitorInfo {
     RECT rect;
     std::wstring position;
 };
-
-bool operator==(const RECT& lhs, const RECT& rhs) {
-    return lhs.left == rhs.left &&
-           lhs.top == rhs.top &&
-           lhs.right == rhs.right &&
-           lhs.bottom == rhs.bottom;
-}
 
 // Function declarations
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam); // Callback function to list open windows
@@ -129,12 +132,51 @@ int globalTotalChecked = 0;
 HWND hwndOverlay = NULL; // Globale Variable zum Speichern des Overlay-Fenster-Handles
 HANDLE hThread = NULL;
 bool g_bThreadRunning = true;
+const UINT_PTR BLINKING_TIMER_ID = 1;
+int BLINKING_TIMER_ID_time = 250;
+const UINT_PTR TOOLTIP_TIMER_ID = 2;
+int TOOLTIP_TIMER_ID_time = 3000;
+const UINT_PTR TRAY_CONTEXTMENU_TIMER_ID = 3;
+int TRAY_CONTEXTMENU_TIMER_ID_time = 100;
+HWND lastHoveredImage = NULL;
+HICON lastOriginalIcon = NULL;
+bool globalTotalCheckedIgnore = false;
+
+std::vector<TimerInfo> timers = {
+    {BLINKING_TIMER_ID, BLINKING_TIMER_ID_time},
+    {TOOLTIP_TIMER_ID, TOOLTIP_TIMER_ID_time},
+    {TRAY_CONTEXTMENU_TIMER_ID, TRAY_CONTEXTMENU_TIMER_ID_time}
+};
 
 HWND hwndTT;
 HWND hSearchBox;
 HWND hEraseButton;
 HWND hGoToButton;
 HMENU hMenu;
+
+bool operator==(const RECT& lhs, const RECT& rhs) {
+    return lhs.left == rhs.left &&
+           lhs.top == rhs.top &&
+           lhs.right == rhs.right &&
+           lhs.bottom == rhs.bottom;
+}
+
+void CheckAndStopTimers(HWND hwnd, std::vector<TimerInfo>& timers, std::vector<BOOL>& timerStates) {
+    // Implementiere die Logik zum Prüfen und Stoppen der Timer
+    for (size_t i = 0; i < timers.size(); ++i) {
+        timerStates[i] = KillTimer(hwnd, timers[i].id);
+    }
+}
+
+void RestartTimers(HWND hwnd, std::vector<TimerInfo>& timers, std::vector<BOOL>& timerStates) {
+    // Implementiere die Logik zum Neustarten der Timer
+    for (size_t i = 0; i < timers.size(); ++i) {
+        if (timerStates[i]) {
+            SetTimer(hwnd, timers[i].id, timers[i].interval, nullptr);
+        }
+    }
+}
+
 
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     ////std::cout << "EnumWindowsProc" << std::endl;
@@ -325,6 +367,7 @@ void ClearTemporaryTiles() {
 
     // Fenster zerstören
     if (hwndOverlay != NULL) {
+        globalTotalCheckedIgnore = false;
         DestroyWindow(hwndOverlay);
         hwndOverlay = NULL;
     }
@@ -360,26 +403,30 @@ LRESULT CALLBACK OverlayWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
             GetClientRect(hwnd, &rect);
 
             // Beispielhafte Zeichnung der Tiles
-            HPEN hPen = CreatePen(PS_SOLID, 5, RGB(0, 0, 255));
+            HPEN hPen = CreatePen(PS_SOLID, 5, RGB(255, 0, 0));
             HPEN hOldPen = (HPEN)SelectObject(hdc, hPen);
             HBRUSH hBrush = (HBRUSH)GetStockObject(NULL_BRUSH);
             HBRUSH hOldBrush = (HBRUSH)SelectObject(hdc, hBrush);
 
             int numWindows = globalTotalChecked;
-            int cols = static_cast<int>(ceil(sqrt(numWindows)));
-            int rows = (numWindows + cols - 1) / cols;
-            int windowWidth = (rect.right - rect.left) / cols;
-            int windowHeight = (rect.bottom - rect.top) / rows;
+            if (globalTotalCheckedIgnore || numWindows == 0) numWindows = 1;
 
-            int x = 0, y = 0;
-            for (int counter = 0; counter < numWindows; counter++) {
-                RECT tileRect = {rect.left + x, rect.top + y, rect.left + x + windowWidth - 10, rect.top + y + windowHeight - 10};
-                Rectangle(hdc, tileRect.left, tileRect.top, tileRect.right, tileRect.bottom);
+            if (numWindows > 0) {
+                int cols = static_cast<int>(ceil(sqrt(numWindows)));
+                int rows = (numWindows + cols - 1) / cols;
+                int windowWidth = (rect.right - rect.left) / cols;
+                int windowHeight = (rect.bottom - rect.top) / rows;
 
-                x += windowWidth;
-                if (x >= rect.right - 20) {
-                    x = 0;
-                    y += windowHeight;
+                int x = 0, y = 0;
+                for (int counter = 0; counter < numWindows; counter++) {
+                    RECT tileRect = {rect.left + x, rect.top + y, rect.left + x + windowWidth - 10, rect.top + y + windowHeight - 10};
+                    Rectangle(hdc, tileRect.left, tileRect.top, tileRect.right, tileRect.bottom);
+
+                    x += windowWidth;
+                    if (x >= rect.right - 5) {
+                        x = 0;
+                        y += windowHeight;
+                    }
                 }
             }
 
@@ -398,13 +445,29 @@ LRESULT CALLBACK OverlayWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
     }
 }
 
-void ShowTemporaryTiles(HWND hwnd, int screenIndex) {
+int ShowMessageBoxAndHandleTimers(HWND hwnd, const std::wstring& message, const std::wstring& title, UINT type, std::vector<TimerInfo>& timers) {
+    // Timer prüfen und stoppen
+    std::vector<BOOL> timerStates(timers.size());
+    CheckAndStopTimers(hwnd, timers, timerStates);
+
+    // MessageBox anzeigen und Ergebnis speichern
+    int result = MessageBoxW(hwnd, message.c_str(), title.c_str(), type | MB_DEFBUTTON2);
+
+    // Timer neu starten
+    RestartTimers(hwnd, timers, timerStates);
+
+    // Ergebnis zurückgeben
+    return result;
+}
+
+void ShowTemporaryTiles(HWND hwnd, int screenIndex) { // Diese Funktion wird nicht mehr verwendet, sondern OverlayWindowProc()
     try {
         RECT screenRect = GetScreenRect(screenIndex);
         int screenWidth = screenRect.right - screenRect.left;
         int screenHeight = screenRect.bottom - screenRect.top - getTaskbarHeight(hwnd);
 
         int numWindows = globalTotalChecked;
+        if (globalTotalCheckedIgnore || numWindows == 0) numWindows = 1;
 
         if (numWindows > 0) {
             int cols = static_cast<int>(ceil(sqrt(numWindows)));
@@ -443,7 +506,7 @@ void ShowTemporaryTiles(HWND hwnd, int screenIndex) {
             SetForegroundWindow(hwnd);
         }
     } catch (const std::exception& e) {
-        MessageBox(hwnd, std::wstring(e.what(), e.what() + strlen(e.what())).c_str(), L"Error in ShowTemporaryTiles", MB_OK);
+        //MessageBox(hwnd, std::wstring(e.what(), e.what() + strlen(e.what())).c_str(), L"Error in ShowTemporaryTiles", MB_OK);
     }
 }
 
@@ -497,7 +560,6 @@ DWORD WINAPI ShowTemporaryTilesThread(LPVOID lpParam) {
     // Stellen Sie sicher, dass das Overlay-Fenster auf dem richtigen Bildschirm positioniert ist
     SetWindowPos(hwndOverlay, HWND_TOPMOST, screenRect.left, screenRect.top, screenWidth, screenHeight, SWP_SHOWWINDOW);
 
-    // Debug-Ausgabe für die Fensterposition
     RECT overlayRect;
     GetWindowRect(hwndOverlay, &overlayRect);
     /*std::wcout << L"Overlay Window Rect: (" << overlayRect.left << L", " << overlayRect.top << L") - ("
@@ -668,6 +730,39 @@ void MoveWindowToPrimaryMonitor(HWND hwnd) {
     SetWindowPos(hwnd, HWND_TOP, newX, newY, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
 }
 
+HICON InvertIconColors(HICON hIcon) {
+    ICONINFO iconInfo;
+    GetIconInfo(hIcon, &iconInfo);
+
+    HDC hdc = GetDC(NULL);
+    HDC hdcMem = CreateCompatibleDC(hdc);
+    HBITMAP hbmOld = (HBITMAP)SelectObject(hdcMem, iconInfo.hbmColor);
+
+    BITMAP bm;
+    GetObject(iconInfo.hbmColor, sizeof(bm), &bm);
+
+    // Invertiere die Farben
+    for (int y = 0; y < bm.bmHeight; y++) {
+        for (int x = 0; x < bm.bmWidth; x++) {
+            COLORREF color = GetPixel(hdcMem, x, y);
+            SetPixel(hdcMem, x, y, RGB(255 - GetRValue(color), 255 - GetGValue(color), 255 - GetBValue(color)));
+        }
+    }
+
+    SelectObject(hdcMem, hbmOld);
+    DeleteDC(hdcMem);
+    ReleaseDC(NULL, hdc);
+
+    // Erstelle ein neues Icon mit den invertierten Farben
+    HICON hIconInverted = CreateIconIndirect(&iconInfo);
+
+    // Bereinige
+    DeleteObject(iconInfo.hbmColor);
+    DeleteObject(iconInfo.hbmMask);
+
+    return hIconInverted;
+}
+
 void CreateMoveToScreenMenu(HMENU hMenu) {
     ////std::cout << "CreateMoveToScreenMenu" << std::endl;
     HMENU hMoveToScreenMenu = CreateMenu();
@@ -814,7 +909,7 @@ void ShowTooltip(HWND hwnd, const wchar_t* message) {
     SendMessage(hwndTT, TTM_TRACKACTIVATE, TRUE, (LPARAM)&ti);
 
     // Timer to hide the tooltip after a few seconds
-    SetTimer(hwnd, 2, 3000, NULL); // 3 seconds
+    SetTimer(hwnd,TOOLTIP_TIMER_ID, TOOLTIP_TIMER_ID_time, NULL); // 3 seconds
 }
 
 void CreateArrangeOnScreenMenu(HMENU hMenu) {
@@ -960,6 +1055,52 @@ void MoveWindowToMainMonitor(HWND hwnd) {
         // Fenster wieder maximieren
         ShowWindow(hwnd, SW_MAXIMIZE);
     }
+}
+
+void AdjustWindowToFitMenu(HWND hwnd) {
+    HMENU hMenu = GetMenu(hwnd);
+    if (!hMenu) return;
+
+    HDC hdc = GetDC(hwnd);
+    HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+    SelectObject(hdc, hFont);
+
+    // DPI-Skalierung abrufen
+    UINT dpi = GetDpiForWindow(hwnd);
+    float scaleFactor = dpi / 96.0f;
+
+    int totalWidth = 0;
+    int itemCount = GetMenuItemCount(hMenu);
+
+    for (int i = 0; i < itemCount; ++i) {
+        MENUITEMINFO mii = { sizeof(MENUITEMINFO) };
+        mii.fMask = MIIM_STRING;
+        wchar_t itemText[256];
+        mii.dwTypeData = itemText;
+        mii.cch = sizeof(itemText) / sizeof(itemText[0]);
+        GetMenuItemInfo(hMenu, i, TRUE, &mii);
+
+        SIZE textSize;
+        GetTextExtentPoint32(hdc, itemText, lstrlen(itemText), &textSize);
+        totalWidth += static_cast<int>(textSize.cx * scaleFactor) + 25; // Füge 25 Pixel Puffer hinzu
+    }
+
+    ReleaseDC(hwnd, hdc);
+
+    // Lege eine minimale Breite fest
+    const int minWidth = 700; // Beispielwert, anpassen nach Bedarf
+    int newWidth = std::max(totalWidth, minWidth);
+
+    RECT windowRect;
+    GetWindowRect(hwnd, &windowRect);
+
+    RECT adjustedRect = {0, 0, newWidth, windowRect.bottom - windowRect.top};
+    AdjustWindowRectEx(&adjustedRect, GetWindowLong(hwnd, GWL_STYLE), TRUE, GetWindowLong(hwnd, GWL_EXSTYLE));
+
+    int newHeight = adjustedRect.bottom - adjustedRect.top;
+    textWidth = newWidth;
+    //SetWindowPos(hSearchBox, NULL, windowRect.left, windowRect.top, newWidth, newHeight, SWP_NOZORDER | SWP_NOMOVE);
+
 }
 
 // Function to allow sorting case-insensitive
@@ -1217,20 +1358,97 @@ void AdjustWindowSize(HWND hwnd) {
     SetWindowPos(hwnd, NULL, xPos, newYPos, contentWidth, newHeight, SWP_NOZORDER); // Setzen Sie die neue Fensterposition und -größe
 }
 
+// Wrapper-Funktion für CreateArrangeOnScreenMenu
+DWORD WINAPI ThreadFuncCreateArrangeMenu(LPVOID lpParam) {
+    HMENU hMenu = (HMENU)lpParam;
+    CreateArrangeOnScreenMenu(hMenu);
+    return 0;
+}
+
+// Wrapper-Funktion für CreateMoveToScreenMenu
+DWORD WINAPI ThreadFuncCreateMoveMenu(LPVOID lpParam) {
+    HMENU hMenu = (HMENU)lpParam;
+    CreateMoveToScreenMenu(hMenu);
+    return 0;
+}
+
+void ExecuteCreateArrangeAndMoveMenuInThreads(HMENU hMenu) {
+    // Erstelle den ersten Thread
+    HANDLE hThread1 = CreateThread(
+        NULL,       // Standard-Sicherheitsattribute
+        0,          // Standard-Stackgröße
+        ThreadFuncCreateArrangeMenu, // Thread-Funktion
+        hMenu,      // Parameter für die Thread-Funktion
+        0,          // Standard-Erstellungsflags
+        NULL        // Thread-ID (optional)
+    );
+
+    // Warte, bis der erste Thread beendet ist
+    WaitForSingleObject(hThread1, INFINITE);
+
+    // Schließe das Handle des ersten Threads
+    CloseHandle(hThread1);
+
+    // Erstelle den zweiten Thread
+    HANDLE hThread2 = CreateThread(
+        NULL,       // Standard-Sicherheitsattribute
+        0,          // Standard-Stackgröße
+        ThreadFuncCreateMoveMenu, // Thread-Funktion
+        hMenu,      // Parameter für die Thread-Funktion
+        0,          // Standard-Erstellungsflags
+        NULL        // Thread-ID (optional)
+    );
+
+    // Warte, bis der zweite Thread beendet ist
+    WaitForSingleObject(hThread2, INFINITE);
+
+    // Schließe das Handle des zweiten Threads
+    CloseHandle(hThread2);
+}
+
 void InitializeMenu(HWND hwnd) {
     ////std::cout << "InitializeMenu" << std::endl;
     hMenu = CreateMenu();
-    AppendMenu(hMenu, MF_STRING, ID_MINIMIZE, L"&Minimize Window(s)");
+    /*AppendMenu(hMenu, MF_STRING, ID_MINIMIZE, L"&Minimize Window(s)");
     AppendMenu(hMenu, MF_STRING, ID_MAXIMIZE, L"Ma&ximize Window(s)");
     AppendMenu(hMenu, MF_STRING, ID_RESTORE, L"&Restore Window(s)");
 
     // Füge die dynamischen Einträge direkt hinzu
-    CreateArrangeOnScreenMenu(hMenu);
-    CreateMoveToScreenMenu(hMenu);
+    ExecuteCreateArrangeAndMoveMenuInThreads(hMenu);
+    //CreateArrangeOnScreenMenu(hMenu);
+    //CreateMoveToScreenMenu(hMenu);
 
     //AppendMenu(hMenu, MF_STRING, ID_CLOSE, L"&Close Window(s)");
     AppendMenu(hMenu, MF_STRING, ID_SAVEANDCLOSE, L"&Save And Close Window(s)");
+    AppendMenu(hMenu, MF_STRING, ID_EXIT_BUTTON, L"&Exit");
+    SetMenu(hwnd, hMenu);*/
+
+    // File menu
+    HMENU hFileMenu = CreateMenu();
+    AppendMenu(hFileMenu, MF_STRING, ID_CLOSE_PROGRAMM, L"&Close");
+    AppendMenu(hFileMenu, MF_STRING, ID_EXIT_BUTTON, L"&Exit");
+    AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hFileMenu, L"&File");
+
+    // Size menu
+    HMENU hSizeMenu = CreateMenu();
+    AppendMenu(hSizeMenu, MF_STRING, ID_MINIMIZE, L"&Minimize Window(s)");
+    AppendMenu(hSizeMenu, MF_STRING, ID_MAXIMIZE, L"Ma&ximize Window(s)");
+    AppendMenu(hSizeMenu, MF_STRING, ID_RESTORE, L"&Restore Window(s)");
+    AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hSizeMenu, L"&Size Window(s)");
+
+    // Arrange menu
+    HMENU hArrangeMenu = CreateMenu();
+    ExecuteCreateArrangeAndMoveMenuInThreads(hArrangeMenu);
+    AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hArrangeMenu, L"&Arrange Window(s)");
+
+    // Close menu
+    HMENU hCloseMenu = CreateMenu();
+    AppendMenu(hCloseMenu, MF_STRING, ID_CLOSE, L"&Close Window(s) without Saving");
+    AppendMenu(hCloseMenu, MF_STRING, ID_SAVEANDCLOSE, L"&Save And Close Window(s)");
+    AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hCloseMenu, L"&Close Window(s)");
+
     SetMenu(hwnd, hMenu);
+
 }
 
 void UpdateDynamicMenus(HWND hwnd) {
@@ -1287,7 +1505,8 @@ bool ConfirmClose(HWND parentHwnd) {
     SetForegroundWindow(parentHwnd);
 
     // Zeige das Bestätigungsdialogfeld an
-    int result = MessageBoxW(parentHwnd, L"Do you really want to close the selected windows?", L"Confirmation", MB_YESNO | MB_ICONQUESTION | MB_TOPMOST);
+    int result = ShowMessageBoxAndHandleTimers(parentHwnd, L"Do you really want to close the selected windows?", L"Confirmation", MB_YESNO | MB_ICONQUESTION | MB_TOPMOST, timers);
+    //int result = MessageBoxW(parentHwnd, L"Do you really want to close the selected windows?", L"Confirmation", MB_YESNO | MB_ICONQUESTION | MB_TOPMOST);
 
     // Gib zurück, ob der Benutzer "Ja" gewählt hat
     return (result == IDYES);
@@ -1438,6 +1657,7 @@ void SearchAndCheckErase(HWND hwnd) {
     //InvalidateRect(hwnd, NULL, TRUE);
 }
 
+
 void CreateCustomMenu(HWND parentHwnd, POINT pt) {
     WNDCLASS wc = {};
     wc.lpfnWndProc = CustomMenuProc;
@@ -1448,7 +1668,7 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
     RECT screenRect;
     GetWindowRect(GetDesktopWindow(), &screenRect);
 
-    int width = 320;
+    int width = 400;
     int height = 30 * processNames.size() + getTaskbarHeight(parentHwnd) * 2 + 30;
 
     if (pt.x + 30 + width > screenRect.right)
@@ -1457,10 +1677,10 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
         pt.y = screenRect.bottom - height;
 
     HWND hwnd = CreateWindowEx(
-        0,
+        WS_EX_TRANSPARENT | WS_EX_COMPOSITED | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE,
         L"CustomMenuClass",
         NULL,
-        WS_POPUP | WS_BORDER,
+        WS_POPUP,
         pt.x, pt.y, width, height,
         parentHwnd,
         NULL,
@@ -1471,9 +1691,27 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
     // Set WS_EX_COMPOSITED style for double buffering
     SetWindowLongPtr(hwnd, GWL_EXSTYLE, GetWindowLongPtr(hwnd, GWL_EXSTYLE) | WS_EX_COMPOSITED);
     
-    SetWindowPos(hwnd, HWND_TOPMOST, pt.x, pt.y, width, height, SWP_SHOWWINDOW);
+    SetWindowPos(hwnd, HWND_TOPMOST, pt.x, pt.y, width + 10, height, SWP_SHOWWINDOW);
 
-    SetTimer(hwnd, 1, 100, NULL);
+    // Abgerundete Ecken hinzufügen
+    HRGN hRgn = CreateRoundRectRgn(0, 0, width, height, 20, 20); // 20 ist der Radius der abgerundeten Ecken
+    SetWindowRgn(hwnd, hRgn, TRUE);
+
+    // Schwarzen Rahmen hinzufügen
+    SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 255, LWA_COLORKEY);
+
+    // Schatten hinzufügen
+    MARGINS margins = {3, 3, 3, 3}; // Schattenbreite auf 10 Pixel einstellen
+    DwmExtendFrameIntoClientArea(hwnd, &margins);
+
+    // Blur-Effekt hinzufügen
+    DWM_BLURBEHIND bb = {};
+    bb.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
+    bb.fEnable = TRUE;
+    bb.hRgnBlur = hRgn;
+    DwmEnableBlurBehindWindow(hwnd, &bb);
+
+    SetTimer(hwnd, TRAY_CONTEXTMENU_TIMER_ID, TRAY_CONTEXTMENU_TIMER_ID_time, NULL);
 
     SetForegroundWindow(hwnd);
     SetFocus(hwnd);
@@ -1499,16 +1737,19 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
             int yPos = 10;
             int imageID = ID_IMAGE_START;
+            int width  = 30;
+            int height = 30; 
+            int startx = 280;        
             for (const auto& processName : processNames)
             {
                 HWND hImage1 = CreateWindow(
                     L"STATIC",
                     NULL,
                     WS_VISIBLE | WS_CHILD | SS_ICON | SS_NOTIFY,
-                    200,
+                    startx,
                     yPos,
-                    30,
-                    30,
+                    width,
+                    height,
                     hwnd,
                     (HMENU)MAKEINTRESOURCE(imageID++),
                     (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
@@ -1518,10 +1759,10 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                     L"STATIC",
                     NULL,
                     WS_VISIBLE | WS_CHILD | SS_ICON | SS_NOTIFY,
-                    240,
+                    startx + width + 10,
                     yPos,
-                    30,
-                    30,
+                    width,
+                    height,
                     hwnd,
                     (HMENU)MAKEINTRESOURCE(imageID++),
                     (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
@@ -1531,10 +1772,10 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                     L"STATIC",
                     NULL,
                     WS_VISIBLE | WS_CHILD | SS_ICON | SS_NOTIFY,
-                    280,
+                    startx + 2 * width + 10 + 10,
                     yPos,
-                    30,
-                    30,
+                    width,
+                    height,
                     hwnd,
                     (HMENU)MAKEINTRESOURCE(imageID++),
                     (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
@@ -1550,7 +1791,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 yPos += 30;
             }
 
-        HWND hQuitMenuImage = CreateWindow(
+        /*HWND hQuitMenuImage = CreateWindow(
             L"STATIC",
             L"Quit Menu",
             WS_VISIBLE | WS_CHILD | SS_CENTER | SS_NOTIFY | WS_BORDER | SS_CENTERIMAGE,
@@ -1563,23 +1804,43 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
             NULL);
 
-            images.push_back(hQuitMenuImage);
+            images.push_back(hQuitMenuImage);*/
 
-        HWND hExitImage = CreateWindow(
-            L"STATIC",
-            L"Exit",
-            WS_VISIBLE | WS_CHILD | SS_CENTER | SS_NOTIFY | WS_BORDER | SS_CENTERIMAGE,
-            210,
-            yPos + 30,
-            100,
-            30,
-            hwnd,
-            (HMENU)ID_EXIT_IMAGE,
-            (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
-            NULL);
+            width  = 32;
+            height = 32;
+            HWND hExitButton = CreateWindow(
+                L"BUTTON",
+                L"Exit",
+                WS_TABSTOP | WS_VISIBLE | WS_CHILD | BS_ICON | BS_FLAT,
+                348,
+                yPos + 30,
+                width,
+                height,
+                hwnd,
+                (HMENU)ID_EXIT_IMAGE,
+                (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
+                NULL
+            );
 
-            images.push_back(hExitImage);
+            HICON hIconExit = (HICON)LoadImage(GetModuleHandle(L"SHELL32.DLL"), MAKEINTRESOURCE(16805), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
+            if (hIconExit == NULL) {
+                OutputDebugString(L"Failed to load icon\n");
+            } else {
+                SendMessage(hExitButton, BM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconExit);
+            }
 
+            //images.push_back(hExitButton);
+
+            // Abgerundete Ecken hinzufügen
+            HRGN hRgn = CreateRoundRectRgn(0, 0, width, height, 20, 20); // 20 ist der Radius der abgerundeten Ecken
+            SetWindowRgn(hExitButton, hRgn, TRUE);
+
+            // Hintergrundfarbe und Textfarbe anpassen
+            HDC hdc = GetDC(hExitButton);
+            SetBkColor(hdc, RGB(0, 0, 0)); // Schwarzer Hintergrund
+            SetTextColor(hdc, RGB(255, 255, 255)); // Weißer Text
+            ReleaseDC(hExitButton, hdc);
+          
             break;
         }
 
@@ -1604,6 +1865,43 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
         case WM_SETCURSOR:
         {
             SetCursor(LoadCursor(NULL, IDC_ARROW));
+            HWND hWndCursor = (HWND)wParam;
+            if (std::find(images.begin(), images.end(), hWndCursor) != images.end()) {
+                // Der Mauszeiger befindet sich über einem der STATIC-Elemente
+                POINT pt;
+                GetCursorPos(&pt);
+                ScreenToClient(hwnd, &pt);
+
+                RECT rect;
+                GetWindowRect(hWndCursor, &rect);
+                MapWindowPoints(HWND_DESKTOP, hwnd, (LPPOINT)&rect, 2);
+
+                if (PtInRect(&rect, pt)) {
+                    if (hWndCursor != lastHoveredImage) {
+                        // Setze das vorherige Icon zurück
+                        if (lastHoveredImage != NULL) {
+                            SendMessage(lastHoveredImage, STM_SETIMAGE, IMAGE_ICON, (LPARAM)lastOriginalIcon);
+                        }
+
+                        // Invertiere das neue Icon
+                        HICON hIcon = (HICON)SendMessage(hWndCursor, STM_GETIMAGE, IMAGE_ICON, 0);
+                        lastOriginalIcon = hIcon; // Speichere das Original-Icon
+                        HICON hIconInverted = InvertIconColors(hIcon);
+                        SendMessage(hWndCursor, STM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconInverted);
+                        lastHoveredImage = hWndCursor;
+                        OutputDebugString(L"Icon inverted\n");
+                    }
+                }
+                return TRUE; // Verhindert die Standard-Cursor-Verarbeitung
+            } else {
+                // Setze das Icon zurück, wenn der Mauszeiger das STATIC-Element verlässt
+                if (lastHoveredImage != NULL) {
+                    SendMessage(lastHoveredImage, STM_SETIMAGE, IMAGE_ICON, (LPARAM)lastOriginalIcon);
+                    lastHoveredImage = NULL;
+                    lastOriginalIcon = NULL;
+                    OutputDebugString(L"Icon reset\n");
+                }
+            }
             return TRUE;
         }
 
@@ -1675,7 +1973,8 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             if (wmId == ID_EXIT_IMAGE)
             {
                 SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-                int result = MessageBox(NULL, L"Are you sure you want to exit the 'Manage Multiple Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST);
+                int result = MessageBox(NULL, L"Are you sure you want to exit the 'Manage Multiple Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST | MB_DEFBUTTON2);
+                //int result = ShowMessageBoxAndHandleTimers(NULL, L"Are you sure you want to exit the 'Manage Multiple Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST, timers);
 
                 if (result == IDYES)
                 {
@@ -1688,7 +1987,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             }
             if (wmId == ID_QUITMENU_IMAGE)
             {
-                KillTimer(hwnd, 1);
+                KillTimer(hwnd, TRAY_CONTEXTMENU_TIMER_ID);
                 DestroyWindow(hwnd);
             }
 
@@ -1766,7 +2065,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                             ProcessMessages(); // Process messages
                             //MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, 50, 50, TRUE); // Move and resize the window
                             //ProcessMessages(); // Process messages
-                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth, windowHeight, TRUE); // Move and resize the window
+                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth - 5, windowHeight, TRUE); // Move and resize the window
                             ProcessMessages(); // Process messages
 
                             /*x += windowWidth; // Increment the X position
@@ -1825,7 +2124,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                             ProcessMessages(); // Process messages
 
                             x += windowWidth; // Increment the X position
-                            if (x >= screenWidth) { // Check if the X position exceeds the screen width
+                            if (x >= screenWidth - 20) { // Check if the X position exceeds the screen width
                                 x = 0; // Reset the X position
                                 y += windowHeight; // Increment the Y position
                             }
@@ -1893,7 +2192,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             GetWindowRect(hwnd, &rect);
             if (!PtInRect(&rect, pt))
             {
-                KillTimer(hwnd, 1);
+                KillTimer(hwnd, TRAY_CONTEXTMENU_TIMER_ID);
                 DestroyWindow(hwnd);
             }
             break;
@@ -1902,6 +2201,33 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
     return 0;
+}
+
+int GetWindowWidth(HWND hwnd) {
+    RECT windowRect;
+    if (GetWindowRect(hwnd, &windowRect)) {
+        int width = windowRect.right - windowRect.left;
+        return width;
+    }
+    return -1; // Fehlerfall
+}
+
+void UpdateControlPositions(HWND hwnd) {
+    RECT clientRect;
+    GetClientRect(hwnd, &clientRect);
+
+    int searchBoxWidth = 200; // Breite des Suchfelds
+    int searchBoxHeight = 20; // Höhe des Suchfelds
+    int buttonWidth = 20; // Breite der Buttons
+    int buttonHeight = searchBoxHeight; // Höhe der Buttons
+    int padding = 5; // Abstand zwischen den Steuerelementen
+
+    int searchBoxX = clientRect.right - searchBoxWidth - 2 * buttonWidth - 3 * padding;
+    int searchBoxY = 5; // Position Y des Suchfelds
+
+    SetWindowPos(hSearchBox, NULL, searchBoxX, searchBoxY, searchBoxWidth, searchBoxHeight, SWP_NOZORDER);
+    SetWindowPos(hEraseButton, NULL, searchBoxX + searchBoxWidth + padding, searchBoxY, buttonWidth, buttonHeight, SWP_NOZORDER);
+    SetWindowPos(hGoToButton, NULL, searchBoxX + searchBoxWidth + buttonWidth + 2 * padding, searchBoxY, buttonWidth, buttonHeight, SWP_NOZORDER);
 }
 
 // Window procedure
@@ -2002,7 +2328,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
             }
         }
-        SetTimer(hwnd, 1, 250, NULL);
+        SetTimer(hwnd, BLINKING_TIMER_ID, 250, NULL);
         //InvalidateWindow(hwnd);
         break;
 
@@ -2021,12 +2347,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_TIMER: {
             ////std::cout << "WM_KEYDOWN" << std::endl;
-            if (wParam == 1) {
+            if (wParam == BLINKING_TIMER_ID) {
                 //DestroyWindow(hwnd);
                 blinkState = !blinkState; // Toggle the blink state
                 InvalidateRect(hwnd, NULL, TRUE); // Fenster neu zeichnen
-            } /*else if (wParam == 2) {
-            KillTimer(hwnd, 2);
+            } /*else if (wParam == TOOLTIP_TIMER_ID) {
+            KillTimer(hwnd, TOOLTIP_TIMER_ID);
             HWND hwndTT = FindWindowEx(NULL, NULL, TOOLTIPS_CLASS, NULL);
             if (hwndTT) {
                 SendMessage(hwndTT, TTM_TRACKACTIVATE, FALSE, 0);
@@ -2038,8 +2364,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_DRAWITEM: { // Message when drawing an item
             ////std::cout << "WM_DRAWITEM" << std::endl;
             /*LPDRAWITEMSTRUCT lpDrawItem = (LPDRAWITEMSTRUCT)lParam; // Draw item structure
-            if (lpDrawItem->CtlID >= 3000 && lpDrawItem->CtlID < 3000 + processNames.size()) { // Check the ID
-                std::wstring processName = processNames[lpDrawItem->CtlID - 3000]; // Retrieve the process name
+            if (lpDrawItem->CtlID >= ID_PROCESSNAMESTART && lpDrawItem->CtlID < ID_PROCESSNAMESTART + processNames.size()) { // Check the ID
+                std::wstring processName = processNames[lpDrawItem->CtlID - ID_PROCESSNAMESTART]; // Retrieve the process name
                 wchar_t buttonText = expandedState[processName] ? 'v' : '>'; // Set the button text
 
                 // Create a brush and fill the rectangle only if necessary
@@ -2202,11 +2528,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
 
                 if (!isChecked) {
-                    MessageBoxW(hwnd, L"Please select one or more window(s).", L"Warning", MB_OK | MB_ICONWARNING);
-                    break; // Exit the WM_COMMAND handler if no window is checked
+                    int result = ShowMessageBoxAndHandleTimers(hwnd, L"Please select one or more window(s).", L"Warning", MB_OK | MB_ICONWARNING, timers);
+                    break;
                 }
             }
-
 
             if (id == ID_MINIMIZE) { // Check if the ID is 2000 (Minimize)
                 MinimizeToTray(hwnd); // Minimize the window to the tray
@@ -2333,6 +2658,21 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     //InvalidateWindow(hwnd);
                     Sleep(100); // Short pause
                 }
+                } else if (id == ID_EXIT_BUTTON) {
+                    SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                    //int result = MessageBox(NULL, L"Are you sure you want to exit the 'Manage Multiple Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST);
+                    int result = ShowMessageBoxAndHandleTimers(NULL, L"Are you sure you want to exit the 'Manage Multiple Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST, timers);
+
+                    if (result == IDYES)
+                    {
+                        PostQuitMessage(0);
+                    }
+                    else
+                    {
+                        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                    }
+                } else if (id == ID_CLOSE_PROGRAMM) {
+                    MinimizeToTray(hwnd); // Minimize the window to the tray
                 } else if (id == ID_SAVEANDCLOSE) { // Check if the ID is SAVEANDCLOSE
                 if (ConfirmClose(hwnd)) { // Display confirmation dialog
                     ProcessMessages(); // Process messages
@@ -2439,11 +2779,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             ProcessMessages(); // Process messages
                             //MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, 50, 50, TRUE); // Move and resize the window
                             //ProcessMessages(); // Process messages
-                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth, windowHeight, TRUE); // Move and resize the window
+                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth - 5, windowHeight, TRUE); // Move and resize the window
                             ProcessMessages(); // Process messages
 
                             x += windowWidth; // Increment the X position
-                            if (x >= screenWidth) { // Check if the X position exceeds the screen width
+                            if (x >= screenWidth - 20) { // Check if the X position exceeds the screen width
                                 x = 0; // Reset the X position
                                 y += windowHeight; // Increment the Y position
                             }
@@ -2465,7 +2805,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             // Berechnete Fenstergröße
                             int adjustedWidth = adjustedRect.right - adjustedRect.left;
                             int adjustedHeight = adjustedRect.bottom - adjustedRect.top;
-
+                            //std::cout << windowWidth << " " << adjustedWidth << std::endl;
                             // Aktualisiere die maximale Breite
                             if (adjustedWidth > maxAdjustedWidth) {
                                 maxAdjustedWidth = adjustedWidth;
@@ -2498,7 +2838,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             ProcessMessages(); // Process messages
 
                             x += windowWidth; // Increment the X position
-                            if (x >= screenWidth) { // Check if the X position exceeds the screen width
+                            if (x >= screenWidth - 20) { // Check if the X position exceeds the screen width
                                 x = 0; // Reset the X position
                                 y += windowHeight; // Increment the Y position
                             }
@@ -2527,6 +2867,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 PostQuitMessage(0); // Quit the application
             } else if (id >= ID_MOVE_TO_SCREEN_BASE && id <= ID_MOVE_TO_SCREEN_BASE + screenCount) { // Check if the ID is 2004ff (Move to Screen x)
                 MinimizeToTray(hwnd); // Minimize the window to the tray
+                ClearTemporaryTiles();
                 int screenIndex = (id - ID_MOVE_TO_SCREEN_BASE) ; // Handle move to screen action
                 RECT screenRect = GetScreenRect(screenIndex);
                  for (const auto& entry : processWindowsMap) { // Iterate through all processes
@@ -2543,9 +2884,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 ProcessMessages(); // Process messages
                 //InvalidateWindow(hwnd);
                 Sleep(100); // Short pause
-            } else if (id >= 3000 && id < 3000 + processNames.size()) { // Check if the ID is within the range of process names and thus collapse/expand needed
+            } else if (id >= ID_PROCESSNAMESTART && id < ID_PROCESSNAMESTART + processNames.size()) { // Check if the ID is within the range of process names and thus collapse/expand needed
                 //MessageBoxW(hwnd, L"aha3", L"Debug Info", MB_OK);
-                std::wstring processName = processNames[id - 3000]; // Retrieve the process name based on the ID
+                std::wstring processName = processNames[id - ID_PROCESSNAMESTART]; // Retrieve the process name based on the ID
                 //checkboxState[processName] = !checkboxState[processName]; // Toggle the checkbox state for the process
                 expandedState[processName] = !expandedState[processName]; // Toggle the expanded state for the process
 
@@ -2730,6 +3071,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
                         StartShowTemporaryTilesInThread(hwnd, menuIndex);
                         //////std::cout << "Nach ShowTemporaryTiles" << std::endl;
+                    }
+                    menuIndex = LOWORD(wParam) - ID_MOVE_TO_SCREEN_BASE;
+                    if (menuIndex >= 0 && menuIndex < monitors.size()) {
+                        //////std::cout << "Vor ShowTemporaryTiles for Move To Screen" << std::endl;
+                        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                        globalTotalCheckedIgnore = true;
+                        StartShowTemporaryTilesInThread(hwnd, menuIndex);
+                        //////std::cout << "Nach ShowTemporaryTiles for Move To Screen" << std::endl;
                     }
                 }
             } catch (const std::exception& e) {
@@ -3148,9 +3497,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             SetWindowPos(whiteBar, NULL, 0, yPos, width + scrollbarWidth, 55, SWP_NOZORDER); // Position the white bar
             //InvalidateWindow(hwnd);
             if (wParam == SIZE_MINIMIZED) {
-                KillTimer(hwnd, 1); // Timer stoppen
+                KillTimer(hwnd, BLINKING_TIMER_ID); // Timer stoppen
             } else {
-                SetTimer(hwnd, 1, 250, NULL); // Timer neu starten
+                SetTimer(hwnd, BLINKING_TIMER_ID, 250, NULL); // Timer neu starten
             }
             // int buttonCount = 4; // Number of buttons
             // int buttonWidth = (width - 20) / buttonCount; // Calculate the width of a button
@@ -3160,6 +3509,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             // SetWindowPos(restoreButton, NULL, 10 + buttonWidth + 5, yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
             // SetWindowPos(closeButton, NULL, 10 + 2 * (buttonWidth + 5), yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
             // SetWindowPos(arrangeButton, NULL, 10 + 3 * (buttonWidth + 5), yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
+            UpdateControlPositions(hwnd);
         }
         break;
 
@@ -3234,6 +3584,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 MoveWindowToPrimaryMonitor(hwnd);
                 SaveCurrentWindows(); 
                 AdjustWindowSize(hwnd); 
+                AdjustWindowToFitMenu(hwnd);
+                ProcessMessages();
                 //Sleep(150);
                 SetForegroundWindow(hwnd); 
                 InvalidateWindow(hwnd);
@@ -3253,6 +3605,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
 // Main function
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
+    // Handle zum aktuellen Prozess abrufen
+    HANDLE hProcess = GetCurrentProcess();
+
+    // Prioritätsklasse auf HIGH_PRIORITY_CLASS setzen
+    if (SetPriorityClass(hProcess, HIGH_PRIORITY_CLASS)) {
+        //std::cout << "Die Prioritätsstufe wurde erfolgreich erhöht." << std::endl;
+    } else {
+        //std::cerr << "Fehler beim Setzen der Prioritätsstufe." << std::endl;
+    }
     ////std::cout << "WinMain" << std::endl;
     // Main function for Windows applications
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
