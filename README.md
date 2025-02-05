@@ -14,18 +14,18 @@ Download all files into a folder and start **ManyOpenWindows.exe** from there.
 If you prefer, you could also re-build the executables:
 1. Clone the repository:
     ```sh
-    git clone https://github.com/ScienceBoy/ManageMultipleOpenWindows.git
+    git clone https://github.com/ScienceBoy/ManyOpenWindows.git
     ```
 2. Navigate to the project directory:
     ```sh
-    cd ManageMultipleOpenWindows
+    cd ManyOpenWindows
     ```
 3. Build the project using your preferred C++ compiler. Example with g++:
     ```sh
     windres resource.rc -o resource.o
     ```
     ```sh
-    g++ -std=c++17 ManageMultipleOpenWindows.cpp resource.o -o ManageMultipleOpenWindows -lgdi32 -luser32 -lpsapi -lcomctl32 -static-libgcc -static-libstdc++ -static -mwindows -lpthread -O3 -s -DNDEBUG
+    g++ -std=c++17 ManyOpenWindows.cpp resource.o -o ManyOpenWindows -lgdi32 -luser32 -lcomctl32 -lpsapi -ldwmapi -lpthread -static-libgcc -static-libstdc++ -static -O3 -s -DNDEBUG -mwindowsG
     ```
 
 ## Usage
