@@ -1,5 +1,3 @@
-// Sicherheit bei der verarbeitung der suchtexte, stichwort sql-injection und co.
-// Signieren
 #define UNICODE
 #define _UNICODE
 #include <windows.h> // Include Windows API functions
@@ -70,11 +68,13 @@ extern "C" BOOL SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT value);
 #define ID_CTRL_S               3785
 #define ID_CTRL_U               3787
 #define ID_CTRL_Q               3790
+#define ID_CTRL_F               3795
 #define ID_SELECT_SCREEN_BASE   3800
 #define ID_SELECT_ALL           3840 
 #define ID_SELECT_FROM_SCREEN   3850
 #define ID_SELECT_NONE          3860 
 #define ID_SELECT_VISIBLE       3880 
+#define ID_REFRESH              3890
 #define HOTKEY_ID               9000
 #define HOTKEY_EXIT             9001
 
@@ -220,7 +220,7 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
         if (GetModuleFileNameExW(hProcess, NULL, exePath, sizeof(exePath) / sizeof(wchar_t))) { // Pfad zur ausführbaren Datei abrufen
             wchar_t processName[MAX_PATH]; // Buffer für den Prozessnamen
             if (GetModuleBaseNameW(hProcess, NULL, processName, sizeof(processName) / sizeof(wchar_t))) { // Prozessnamen abrufen
-                // Liste der auszuschließenden Prozesse, die von Windows erstellt werden und für den Benutzer nicht nützlich sind
+                // Liste der auszuschließenden Prozesse, die von Windows erstellt werden und/oder für den Benutzer nicht nützlich zu sehen sind
                 std::vector<std::wstring> excludedProcesses = {
                     L"TextInputHost.exe",
                     L"SearchUI.exe",
@@ -231,7 +231,7 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
                     L"sihost.exe",
                     L"dwm.exe",
                     L"smartscreen.exe",
-                    L"ManyOpenWindows.exe",
+                    L"Pulse.exe",
                     L"window_minimizer.exe"
                 };
                 std::wstring processNameStr(processName);
@@ -241,7 +241,7 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
                 }
                 if (IsWindowVisible(hwnd) && std::find(excludedProcesses.begin(), excludedProcesses.end(), processName) == excludedProcesses.end()) { // Überprüfen, ob das Fenster sichtbar und nicht ausgeschlossen ist
                     int length = GetWindowTextW(hwnd, title, sizeof(title) / sizeof(wchar_t)); // Fenstertitel abrufen
-                    if (length > 0 && wcscmp(title, L"Program Manager") != 0) { // "Program Manager" ausschließen
+                    if (length > 0 && wcscmp(title, L"Program Manager") != 0 && wcscmp(title, L"JamPostMessageWindow") != 0) { // "Program Manager" ausschließen
                         if (processNameStr.length() > 4 && 
                             (processNameStr.substr(processNameStr.length() - 4) == L".exe" || 
                              processNameStr.substr(processNameStr.length() - 4) == L".EXE")) {
@@ -254,6 +254,16 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
             }
         }
         CloseHandle(hProcess); // Prozesshandle schließen
+    }
+    std::vector<WindowInfo>* windows = reinterpret_cast<std::vector<WindowInfo>*>(lParam);
+    if (windows->size() > 1) {
+        for (auto it = windows->begin(); it != windows->end(); ) {
+            if (it->processName == L"ManyOpenWindows") {
+                it = windows->erase(it);
+            } else {
+                ++it;
+            }
+        }
     }
     return TRUE; // Enumeration fortsetzen
 }
@@ -886,7 +896,7 @@ void CreateMoveToScreenMenu(HMENU hMenu, bool forceRecreate = false) {
             HBITMAP hBitmap = hBitmapCache[screenCount];
             AddMenuItemWithImage(hMoveToScreenMenu, ID_MOVE_TO_SCREEN_BASE + monitor.index, hBitmap, menuText);
         }
-        AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hMoveToScreenMenu, L"&Move Window(s)\tCtrl+M");
+        AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hMoveToScreenMenu, L"&Move Window(s)\tCTRL+M");
     } else {
         // Move to the same (and only) screen does not make sense, so no menu
         // AppendMenu(hMenu, MF_STRING, ID_MOVE_TO_SCREEN_BASE, L"Mo&ve Window(s)");
@@ -1045,7 +1055,7 @@ void CreateArrangeOnScreenMenu(HMENU hMenu, bool forceRecreate = true) {
         HBITMAP hBitmap = hBitmapCache[screenCount];
         AddMenuItemWithImage(hArrangeOnScreenMenu, ID_ARRANGE + monitor.index, hBitmap, menuText);
     }
-    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hArrangeOnScreenMenu, L"Arra&nge Window(s)\tCtrl+N");
+    AppendMenuW(hMenu, MF_POPUP, (UINT_PTR)hArrangeOnScreenMenu, L"Arra&nge Window(s)\tCTRL+N");
 }
 
 // Function to check if the windows have changed
@@ -1409,6 +1419,7 @@ void AdjustWindowSize(HWND hwnd) {
     //////std::cout << previousHeight << " " << newHeight << std::endl;
     if (previousHeight != newHeight) 
     {
+        newHeight = std::max(newHeight, 100);
         SetWindowPos(hwnd, NULL, xPos, yPos, contentWidth, newHeight, SWP_NOZORDER); // Setzen Sie die neue Fensterposition und -größe
         previousHeight = newHeight;
     }   
@@ -1535,15 +1546,16 @@ void InitializeMenu(HWND hwnd) {
     HMENU hMenu = CreateMenu();
     HMENU hSelectMenu = CreateMenu();
     HMENU hFileMenu = CreateMenu();
-    AppendMenu(hFileMenu, MF_STRING, ID_CLOSE_PROGRAMM, L"&Close Program to Tray\tCtrl+W");
-    AppendMenu(hFileMenu, MF_STRING, ID_EXIT_BUTTON, L"E&xit Program\tCtrl+Q");
+    AppendMenu(hFileMenu, MF_STRING, ID_REFRESH, L"Re&fresh List\tCTRL+SHIFT+M");
+    AppendMenu(hFileMenu, MF_STRING, ID_CLOSE_PROGRAMM, L"&Close Program to Tray\tCTRL+W");
+    AppendMenu(hFileMenu, MF_STRING, ID_EXIT_BUTTON, L"E&xit Program\tCTRL+Q");
     AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hFileMenu, L"&MoW");
 
     // Size menu
     HMENU hSizeMenu = CreateMenu();
-    AppendMenu(hSizeMenu, MF_STRING, ID_MINIMIZE, L"M&inimize Window(s)\tCtrl+I");
-    AppendMenu(hSizeMenu, MF_STRING, ID_MAXIMIZE, L"M&aximize Window(s)\tCtrl+X");
-    AppendMenu(hSizeMenu, MF_STRING, ID_RESTORE, L"&Restore Window(s)\tCtrl+R");
+    AppendMenu(hSizeMenu, MF_STRING, ID_MINIMIZE, L"M&inimize Window(s)\tCTRL+I");
+    AppendMenu(hSizeMenu, MF_STRING, ID_MAXIMIZE, L"M&aximize Window(s)\tCTRL+X");
+    AppendMenu(hSizeMenu, MF_STRING, ID_RESTORE, L"&Restore Window(s)\tCTRL+R");
     AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hSizeMenu, L"Minimize& / Maximize / Restore");
 
     // Arrange menu
@@ -1553,17 +1565,17 @@ void InitializeMenu(HWND hwnd) {
 
     // Select menu
     //HMENU hSelectMenu = CreateMenu();
-    AppendMenu(hSelectMenu, MF_STRING, ID_SELECT_ALL, L"&Select All Windows\tCtrl+S");
-    AppendMenu(hSelectMenu, MF_STRING, ID_SELECT_NONE, L"&Un-select All Windows\tCtrl+U");
+    AppendMenu(hSelectMenu, MF_STRING, ID_SELECT_ALL, L"&Select All Windows\tCTRL+S");
+    AppendMenu(hSelectMenu, MF_STRING, ID_SELECT_NONE, L"&Un-select All Windows\tCTRL+U");
     //HMENU hSelectScreenMenu = CreateSelectScreenMenu(hSelectMenu);
     //AppendMenu(hSelectMenu, MF_POPUP, (UINT_PTR)hSelectScreenMenu, L"Select Screen(s)");
     AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hSelectMenu, L"Select / Un&-Select");
 
     // Close menu
-    HMENU hCloseMenu = CreateMenu();
-    AppendMenu(hCloseMenu, MF_STRING, ID_CLOSE, L"&Close Window(s) without Saving");
-    AppendMenu(hCloseMenu, MF_STRING, ID_SAVEANDCLOSE, L"Sa&ve And Close Window(s)");
-    AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hCloseMenu, L"&Close / Save Window(s)");
+    //HMENU hCloseMenu = CreateMenu();
+    //AppendMenu(hCloseMenu, MF_STRING, ID_CLOSE, L"&Close Application And it's Window(s)");
+    AppendMenu(hMenu, MF_STRING, ID_SAVEANDCLOSE, L"Sa&ve And Close Window(s)");
+    //AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hCloseMenu, L"&Close / Save Window(s)");
 
     SetMenu(hwnd, hMenu);
 }
@@ -2537,10 +2549,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 case VK_UP:
                 {
                     ////std::cout << "VK_UP pressed" << std::endl;
-                    if (highlightedRow > -1)
+                    //if (highlightedRow > -1)
                         ////std::cout << "Initial State: highlightedRow=" << highlightedRow << ", highlightedWindowRow=" << highlightedWindowRow << ", expandedState=" << expandedState[processNames[highlightedRow]] << std::endl;
 
-                    if (highlightedRow > 0 &&
+                    if (highlightedRow > 0 && highlightedRow <= processNames.size() &&
                         !expandedState[processNames[highlightedRow - 1]] &&
                         highlightedWindowRow == -1)
                     {
@@ -2548,7 +2560,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         highlightedRow--;
                         ////std::cout << "Case 11: highlightedRow updated to " << (highlightedRow - 1) << std::endl;
                     }
-                    else if (highlightedRow <= 0 &&
+                    else if (highlightedRow == 0 &&
                             !expandedState[processNames[highlightedRow]] &&
                             highlightedWindowRow == -1)
                     {
@@ -2556,7 +2568,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         highlightedRow = 0;
                         ////std::cout << "Case 12: highlightedRow updated to " << highlightedRow << std::endl;
                     }
-                    else if (highlightedRow > 0 &&
+                    else if (highlightedRow > 0 && highlightedRow <= processNames.size() && 
                             expandedState[processNames[highlightedRow - 1]] &&
                             highlightedWindowRow == -1)
                     {
@@ -2564,33 +2576,41 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         highlightedRow--;
                         ////std::cout << "Case 1: highlightedWindowRow updated to " << highlightedWindowRow << ", highlightedRow updated to " << (highlightedRow - 1) << std::endl;
                     }
-                    else if (highlightedRow <= 0 &&
+                    else if (highlightedRow == 0 &&
                             highlightedWindowRow == -1)
                     {
                         // no change to highlightedWindowRow
                         highlightedRow = 0;
                         ////std::cout << "Case 2: highlightedRow updated to " << highlightedRow << std::endl;
                     }
-                    else if (expandedState[processNames[highlightedRow]] &&
-                            highlightedRow <= 0 &&
+                    else if (highlightedRow == 0 && highlightedRow <= processNames.size() && expandedState[processNames[highlightedRow]] &&
+                            
                             processWindowsMap[processNames[highlightedRow]].size() > 1 &&
                             highlightedWindowRow > highlightedRow * 100000)
                     {
-                        highlightedWindowRow = highlightedWindowRow - 1;
+                        for (auto &window : processWindowsMap[processNames[highlightedRow]])
+                        {
+                            if (!window.visible) highlightedWindowRow--;
+                        }
+                        highlightedWindowRow--;
                         ////std::cout << "Case 3: highlightedWindowRow updated to " << highlightedWindowRow << std::endl;
                         // no change to highlightedRow
                     }
-                    else if (expandedState[processNames[highlightedRow]] &&
-                            highlightedRow > 0 &&
+                    else if (highlightedRow > 0 && highlightedRow <= processNames.size() && expandedState[processNames[highlightedRow]] &&
+                            
                             processWindowsMap[processNames[highlightedRow]].size() > 1 &&
                             highlightedWindowRow > highlightedRow * 100000)
                     {
-                        highlightedWindowRow = highlightedWindowRow - 1;
+                        for (auto &window : processWindowsMap[processNames[highlightedRow]])
+                        {
+                            if (!window.visible) highlightedWindowRow--;
+                        }
+                        highlightedWindowRow--;
                         ////std::cout << "Case 4: highlightedWindowRow updated to " << highlightedWindowRow << std::endl;
                         // no change to highlightedRow
                     }
                     else if (expandedState[processNames[highlightedRow]] &&
-                            highlightedRow <= 0 &&
+                            highlightedRow == 0 &&
                             processWindowsMap[processNames[highlightedRow]].size() > 1 &&
                             highlightedWindowRow == highlightedRow * 100000)
                     {
@@ -2598,8 +2618,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         ////std::cout << "Case 5: highlightedWindowRow updated to " << highlightedWindowRow << std::endl;
                         // no change to highlightedRow
                     }
-                    else if (expandedState[processNames[highlightedRow]] &&
-                            highlightedRow > 0 &&
+                    else if (highlightedRow > 0 && highlightedRow <= processNames.size() && expandedState[processNames[highlightedRow]]
+                            &&
                             processWindowsMap[processNames[highlightedRow]].size() > 1 &&
                             highlightedWindowRow == highlightedRow * 100000)
                     {
@@ -2607,31 +2627,31 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         ////std::cout << "Case 6: highlightedWindowRow updated to " << highlightedWindowRow << std::endl;
                         // no change to highlightedRow
                     }
-                    else if (expandedState[processNames[highlightedRow]] &&
-                            highlightedRow <= 0 &&
+                    else if (highlightedRow == 0 && highlightedRow <= processNames.size() && expandedState[processNames[highlightedRow]]
+                             &&
                             processWindowsMap[processNames[highlightedRow]].size() <= 1)
                     {
                         highlightedWindowRow = -1;
                         ////std::cout << "Case 7: highlightedWindowRow updated to " << highlightedWindowRow << std::endl;
                         // no change to highlightedRow
                     }
-                    else if (expandedState[processNames[highlightedRow]] &&
-                            highlightedRow > 0 &&
+                    else if (highlightedRow > 0 && highlightedRow <= processNames.size() && expandedState[processNames[highlightedRow]]
+                            &&
                             processWindowsMap[processNames[highlightedRow]].size() <= 1)
                     {
                         highlightedWindowRow = -1;
                         ////std::cout << "Case 8: highlightedWindowRow updated to " << highlightedWindowRow << std::endl;
                         // no change to highlightedRow
                     }
-                    else if (!expandedState[processNames[highlightedRow]] &&
-                            highlightedRow > 0)
+                    else if (highlightedRow > 0 && !expandedState[processNames[highlightedRow]]
+                            )
                     {
                         highlightedWindowRow = -1;
                         highlightedRow--;
                         ////std::cout << "Case 9: highlightedWindowRow updated to " << highlightedWindowRow << ", highlightedRow updated to " << highlightedRow << std::endl;
                     }
-                    else if (!expandedState[processNames[highlightedRow]] &&
-                            highlightedRow <= 0)
+                    else if (highlightedRow == 0 && !expandedState[processNames[highlightedRow]]
+                            )
                     {
                         highlightedWindowRow = -1;
                         highlightedRow = 0;
@@ -2649,9 +2669,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 break;
                 case VK_DOWN:
                 {
-                    if (highlightedRow > -1)
+                    //if (highlightedRow > -1)
                         ////std::cout << highlightedRow << " " << highlightedWindowRow << " " << expandedState[processNames[highlightedRow]] << std::endl;
-                    if (highlightedRow < static_cast<int>(processNames.size() - 1))
+                    if (highlightedRow >= 0 && highlightedRow < static_cast<int>(processNames.size() - 1))
                     {
                         if (expandedState[processNames[highlightedRow]])
                             if (highlightedWindowRow < highlightedRow * 100000 + static_cast<int>(processWindowsMap[processNames[highlightedRow]].size()) - 1)
@@ -2659,7 +2679,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                                 if (highlightedWindowRow == -1)
                                     highlightedWindowRow = highlightedRow * 100000;
                                 else
+                                {
+                                    for (auto &window : processWindowsMap[processNames[highlightedRow]])
+                                    {
+                                        if (!window.visible) highlightedWindowRow++;
+                                    }
                                     highlightedWindowRow++;
+                                }
                             }
                             else
                             {
@@ -2676,12 +2702,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     else
                     {
                         highlightedRow = processNames.size() - 1;
-                        if (expandedState[processNames[highlightedRow]])
+                        if (highlightedRow >= 0 && expandedState[processNames[highlightedRow]])
                             if (highlightedWindowRow < highlightedRow * 100000 + static_cast<int>(processWindowsMap[processNames[highlightedRow]].size()) - 1)
                             {
                                 if (highlightedWindowRow == -1)
                                     highlightedWindowRow = highlightedRow * 100000;
                                 else
+                                    for (auto &window : processWindowsMap[processNames[highlightedRow]])
+                                    {
+                                        if (!window.visible) highlightedWindowRow++;
+                                    }
                                     highlightedWindowRow++;
                             }
                     }
@@ -2892,6 +2922,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             {
                 // Handle the hotkey (CTRL+U) (un-select all)
                 SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_SELECT_NONE, 0), 0);
+            }
+            else if ((wParam == 'M') && (GetKeyState(VK_CONTROL) & 0x8000) && (GetKeyState(VK_SHIFT) & 0x8000))
+            {
+                // Handle the hotkey (CTRL+SHIFT+M) (refresh list)
+                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_REFRESH, 0), 0);
             }
             else if ((wParam != VK_UP && wParam != VK_DOWN && IsValidInput(reinterpret_cast<const wchar_t *>(&wParam))) || wParam == VK_BACK || wParam == VK_TAB)
             {
@@ -3356,6 +3391,38 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     //InvalidateWindow(hwnd);
                     Sleep(100); // Short pause
                 }
+            } else if (id == ID_CLOSE) { // Check if the ID is CLOSE
+                if (ConfirmClose(hwnd)) { // Display confirmation dialog
+                    ProcessMessages(); // Process messages
+                    MinimizeToTray(hwnd); // Minimize the window to the tray
+                    for (const auto& entry : processWindowsMap) { // Iterate through all processes
+                        for (const auto& window : entry.second) { // Iterate through all windows of a process
+                            if (window.checked) { // Check if the window is selected
+                                // Fenster in den Vordergrund bringen
+                                SetForegroundWindow(window.hwnd);
+                                PostMessage(window.hwnd, WM_CLOSE, 0, 0); // Close the window
+                                ProcessMessages(); // Process messages
+                            }
+                        }
+                    }
+                    for (auto& entry : processWindowsMap) { // Iterate through all processes
+                        for (auto& window : entry.second) { // Iterate through all windows of a process
+                            window.checked = false; // Deselect the window
+                        }
+                    }
+                    for (auto& state : checkboxState) { // Iterate through all checkbox states
+                        state.second = false; // Deselect the checkbox
+                    }
+                    for (auto& state : expandedState) { // Iterate through all expanded states
+                        state.second = false; // Collapse the expanded state
+                    }
+                    InvalidateRect(hwnd, NULL, TRUE); // Invalidate and redraw the window
+                    UpdateWindowList(hwnd); // Update the window list
+                    AdjustWindowSize(hwnd); // Adjust the window size
+                    ProcessMessages(); // Process messages
+                    //InvalidateWindow(hwnd);
+                    Sleep(100); // Short pause
+                }
             } else if ((id >= ID_ARRANGE && id <= ID_ARRANGE + screenCount) || LOWORD(wParam) == ID_CTRL_N) {//else if (id == 2003) { Check if the ID is 2003 (Arrange)
                 //////////std::cout << "arrange" << std::endl;
                 MinimizeToTray(hwnd); // Minimize the window to the tray
@@ -3665,6 +3732,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 if (wcscmp(text, L"\u2315 Search Name (CTRL-F)") == 0) {
                     //SetWindowText(hSearchBox, L"");
                 }
+            } else if (id == ID_REFRESH || LOWORD(wParam) == ID_CTRL_F) {
+                RefreshWindowList(hwnd);
+                SetForegroundWindow(hwnd);
+                SetFocus(hwnd);
             } else if (HIWORD(wParam) == EN_KILLFOCUS && LOWORD(wParam) == IDC_SEARCHBOX) {
                 wchar_t text[256];
                 GetWindowText(hSearchBox, text, 256);
