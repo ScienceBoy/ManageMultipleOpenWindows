@@ -210,7 +210,7 @@ void RestartTimers(HWND hwnd, std::vector<TimerInfo>& timers, std::vector<BOOL>&
 
 
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
-    //////////////std::cout << "EnumWindowsProc" << std::endl;
+    //std::cout << "EnumWindowsProc" << std::endl;
     wchar_t title[256]; // Buffer für den Fenstertitel
     DWORD processId; // Prozess-ID
     GetWindowThreadProcessId(hwnd, &processId); // Prozess-ID des Fensters abrufen
@@ -269,7 +269,7 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
 }
 
 int getTaskbarHeight(HWND hwnd) {
-    //////////////std::cout << "getTaskbarHeight" << std::endl;
+    //std::cout << "getTaskbarHeight" << std::endl;
     HWND taskbar = FindWindow(L"Shell_TrayWnd", NULL);
     if (taskbar) {
         RECT rect;
@@ -277,7 +277,7 @@ int getTaskbarHeight(HWND hwnd) {
             UINT dpi = GetDpiForWindow(hwnd);
             float scaleFactor = dpi / 96.0f; // 96 ist der Standard-DPI-Wert
             int taskbarHeight = (rect.bottom - rect.top) / scaleFactor;
-            ////////////////std::cout << "taskbar height: " << taskbarHeight << std::endl;
+            //std::cout << "taskbar height: " << taskbarHeight << std::endl;
             return taskbarHeight;
         }
     }
@@ -286,7 +286,7 @@ int getTaskbarHeight(HWND hwnd) {
 
 // Function to return open windows
 std::vector<WindowInfo> getOpenWindows() {
-    //////////////std::cout << "getOpenWindows" << std::endl;
+    //std::cout << "getOpenWindows" << std::endl;
     std::vector<WindowInfo> windows; // Vector to store windows
     EnumWindows(EnumWindowsProc, reinterpret_cast<LPARAM>(&windows)); // Enumerate windows
     return windows; // Return the list of windows
@@ -294,7 +294,7 @@ std::vector<WindowInfo> getOpenWindows() {
 
 // Function to minimize the window to the tray
 void MinimizeToTray(HWND hwnd) {
-    //////////////std::cout << "MinimizeToTray" << std::endl;
+    //std::cout << "MinimizeToTray" << std::endl;
     std::vector<BOOL> timerStates(timers.size());
     CheckAndStopTimers(hwnd, timers, timerStates);
     ShowWindow(hwnd, SW_HIDE); // Hide the window
@@ -302,7 +302,7 @@ void MinimizeToTray(HWND hwnd) {
 
 // Function to create the tray icon
 void CreateTrayIcon(HWND hwnd) {
-    //////////////std::cout << "CreateTrayIcon" << std::endl;
+    //std::cout << "CreateTrayIcon" << std::endl;
     NOTIFYICONDATAW nid = {}; // Structure for the tray icon
     nid.cbSize = sizeof(nid); // Size of the structure
     nid.hWnd = hwnd; // Handle of the window
@@ -316,7 +316,7 @@ void CreateTrayIcon(HWND hwnd) {
 
 // Function to remove the tray icon
 void RemoveTrayIcon(HWND hwnd) {
-    //////////////std::cout << "RemoveTrayIcon" << std::endl;
+    //std::cout << "RemoveTrayIcon" << std::endl;
     NOTIFYICONDATAW nid = {}; // Structure for the tray icon
     nid.cbSize = sizeof(nid); // Size of the structure
     nid.hWnd = hwnd; // Handle of the window
@@ -326,7 +326,7 @@ void RemoveTrayIcon(HWND hwnd) {
 
 // Function to display the tray menu
 void ShowTrayMenu(HWND hwnd){
-    //////////////std::cout << "ShowTrayMenu" << std::endl;
+    //std::cout << "ShowTrayMenu" << std::endl;
     POINT pt; // Struktur für die Cursorposition
     GetCursorPos(&pt); // Cursorposition abrufen
     //SetForegroundWindow(hwnd); // Fenster in den Vordergrund bringen
@@ -343,7 +343,7 @@ void ShowTrayMenu(HWND hwnd){
 
 // Function to process messages
 void ProcessMessages() {
-    //////////////std::cout << "ProcessMessages" << std::endl;
+    //std::cout << "ProcessMessages" << std::endl;
     MSG msg; // Structure for the message
     while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) { // Retrieve messages
         TranslateMessage(&msg); // Translate the message
@@ -353,12 +353,12 @@ void ProcessMessages() {
 
 // Function to save the current windows
 void SaveCurrentWindows() {
-    //////////////std::cout << "SaveCurrentWindows" << std::endl;
+    //std::cout << "SaveCurrentWindows" << std::endl;
     currentWindows = getOpenWindows(); // Save the current windows
 }
 
 bool CompareMonitors(const MonitorInfo& a, const MonitorInfo& b) {
-    //////////////std::cout << "CompareMonitors" << std::endl;
+    //std::cout << "CompareMonitors" << std::endl;
     return a.rect.left < b.rect.left;
 }
 
@@ -367,7 +367,7 @@ bool compareMonitorInfo(const MonitorInfo& info, const HMONITOR& hMonitor) {
 }
 
 bool CompareMonitorsWidthAndHeight(const MonitorInfo& a, const MonitorInfo& b) {
-    //////////////std::cout << "CompareMonitorsWidthAndHeight" << std::endl;
+    //std::cout << "CompareMonitorsWidthAndHeight" << std::endl;
     int widthA = a.rect.right - a.rect.left;
     int widthB = b.rect.right - b.rect.left;
     
@@ -381,7 +381,7 @@ bool CompareMonitorsWidthAndHeight(const MonitorInfo& a, const MonitorInfo& b) {
 }
 
 RECT GetScreenRect(int screenIndex) {
-    //////////////std::cout << "GetScreenRect" << std::endl;
+    //std::cout << "GetScreenRect" << std::endl;
     std::vector<MonitorInfo> monitors;
     EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, (LPARAM)&monitors);
 
@@ -394,7 +394,7 @@ RECT GetScreenRect(int screenIndex) {
 }
 
 BOOL CALLBACK RedrawWindowCallback(HWND hwnd, LPARAM lParam) {
-    //////////////std::cout << "RedrawWindowCallback" << std::endl;
+    //std::cout << "RedrawWindowCallback" << std::endl;
     RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     return TRUE;
 }
@@ -422,12 +422,12 @@ void ClearTemporaryTiles() {
 }
 
 void DrawRectangleWithScaling(HDC hdc, HWND hwnd, RECT screenRect, int x, int y, int windowWidth, int windowHeight) {
-    //////////////std::cout << "DrawRectangleWithScaling" << std::endl;
+    //std::cout << "DrawRectangleWithScaling" << std::endl;
     // Ermitteln des DPI-Werts für das Fenster
     UINT dpi = GetDpiForWindow(hwnd);
     float scaleFactor = dpi / 96.0f; // 96 ist der Standard-DPI-Wert
 
-    ////////////////std::cout << "scaleFactor: " << scaleFactor << std::endl;
+    //std::cout << "scaleFactor: " << scaleFactor << std::endl;
 
     // Anpassen der Koordinaten basierend auf dem Skalierungsfaktor
     RECT tileRect = {
@@ -652,7 +652,7 @@ void StartShowTemporaryTilesInThread(HWND hwnd, int screenIndex) {
 }
 
 BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
-    //////////////std::cout << "MonitorEnumProc" << std::endl;
+    //std::cout << "MonitorEnumProc" << std::endl;
     std::vector<MonitorInfo>* monitors = reinterpret_cast<std::vector<MonitorInfo>*>(dwData);
     
     MONITORINFOEX mi;
@@ -660,7 +660,7 @@ BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMoni
     if (GetMonitorInfo(hMonitor, &mi)) {
         monitors->push_back({static_cast<int>(monitors->size()), mi.rcMonitor, L""});
     }
-    //////////////std::cout << "MonitorEnumProc beendet" << std::endl;
+    //std::cout << "MonitorEnumProc beendet" << std::endl;
     return TRUE;
 }
 
@@ -679,7 +679,7 @@ BOOL CALLBACK MonitorEnumProcSpecial(HMONITOR hMonitor, HDC hdcMonitor, LPRECT l
 }
 
 bool IsValidInput(const wchar_t* input) {
-    //////////////std::cout << "IsValidInput" << std::endl;
+    //std::cout << "IsValidInput" << std::endl;
     while (*input) {
         if (!iswalnum(*input) && // Alphanumerische Zeichen
             *input != L'\\' && *input != L'/' && // Backslash und Forwardslash
@@ -729,7 +729,7 @@ void MoveWindowToScreen(HWND hwnd, int screenIndex) {
     int newScreenWidth = screenRect.right - screenRect.left;
     int newScreenHeight = screenRect.bottom - screenRect.top;
 
-    //////std::cout << newScreenWidth << " " << newScreenHeight << std::endl;
+    //std::cout << newScreenWidth << " " << newScreenHeight << std::endl;
 
     // Calculate the relative position on the current screen
     HMONITOR hMonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
@@ -745,12 +745,12 @@ void MoveWindowToScreen(HWND hwnd, int screenIndex) {
     int currentScreenWidth = mi.rcMonitor.right - mi.rcMonitor.left;
     int currentScreenHeight = mi.rcMonitor.bottom - mi.rcMonitor.top;
 
-    //////std::cout << currentScreenWidth << " " << currentScreenHeight << std::endl;
+    //std::cout << currentScreenWidth << " " << currentScreenHeight << std::endl;
 
     float ratioX = static_cast<float>(newScreenWidth) / currentScreenWidth;
     float ratioY = static_cast<float>(newScreenHeight) / currentScreenHeight;
 
-    //////std::cout << ratioX << " " << ratioY << std::endl;
+    //std::cout << ratioX << " " << ratioY << std::endl;
 
     int relativeX = windowRect.left - currentScreenX;
     int relativeY = windowRect.top - currentScreenY;
@@ -759,8 +759,8 @@ void MoveWindowToScreen(HWND hwnd, int screenIndex) {
     int newX = screenRect.left + static_cast<int>(relativeX * ratioX);
     int newY = screenRect.top + static_cast<int>(relativeY * ratioY);
 
-    //////std::cout << newX << " " << newY << std::endl;
-    //////std::cout << windowWidth * ratioX << " " << windowHeight * ratioY << std::endl;
+    //std::cout << newX << " " << newY << std::endl;
+    //std::cout << windowWidth * ratioX << " " << windowHeight * ratioY << std::endl;
 
     // Move the window to the new position on the target screen
     if (!SetWindowPos(hwnd, NULL, newX, newY, static_cast<int>(windowWidth * ratioX), static_cast<int>(windowHeight * ratioY), SWP_NOZORDER | SWP_SHOWWINDOW)) {
@@ -773,7 +773,7 @@ void MoveWindowToScreen(HWND hwnd, int screenIndex) {
 }
 
 HBITMAP CaptureAndResizeScreen(HWND hwnd, RECT rect, int width, int height) {
-    //////////////std::cout << "CaptureAndResizeScreen" << std::endl;
+    //std::cout << "CaptureAndResizeScreen" << std::endl;
     HDC hdcScreen = GetDC(NULL);
     HDC hdcMem = CreateCompatibleDC(hdcScreen);
     HBITMAP hbmScreen = CreateCompatibleBitmap(hdcScreen, rect.right - rect.left, rect.bottom - rect.top);
@@ -804,7 +804,7 @@ HBITMAP CaptureAndResizeScreen(HWND hwnd, RECT rect, int width, int height) {
 }
 
 void AddMenuItemWithImage(HMENU hMenu, UINT uIDNewItem, HBITMAP hBitmap, const std::wstring& text) {
-    //////////////std::cout << "AddMenuItemWithImage" << std::endl;
+    //std::cout << "AddMenuItemWithImage" << std::endl;
     MENUITEMINFOW mii = { sizeof(MENUITEMINFOW) };
     mii.fMask = MIIM_BITMAP | MIIM_STRING | MIIM_ID;
     mii.wID = uIDNewItem;
@@ -815,7 +815,7 @@ void AddMenuItemWithImage(HMENU hMenu, UINT uIDNewItem, HBITMAP hBitmap, const s
 }
 
 void MoveWindowToPrimaryMonitor(HWND hwnd) {
-    //////////////std::cout << "MoveWindowToPrimaryMonitor" << std::endl;
+    //std::cout << "MoveWindowToPrimaryMonitor" << std::endl;
     // Get the primary monitor's work area
     RECT primaryMonitorRect;
     SystemParametersInfo(SPI_GETWORKAREA, 0, &primaryMonitorRect, 0);
@@ -905,7 +905,7 @@ void CreateMoveToScreenMenu(HMENU hMenu, bool forceRecreate = false) {
 
 // Funktion zum Trimmen von Leerzeichen
 std::wstring trim(const std::wstring& str) {
-    //////////////std::cout << "trim" << std::endl;
+    //std::cout << "trim" << std::endl;
     size_t first = str.find_first_not_of(L' ');
     if (first == std::wstring::npos) return L"";
     size_t last = str.find_last_not_of(L' ');
@@ -914,7 +914,7 @@ std::wstring trim(const std::wstring& str) {
 
 // Funktion zum Umwandeln von Großbuchstaben in nur den ersten Großbuchstaben
 std::wstring capitalizeIfAllCaps(const std::wstring& str) {
-    //////////////std::cout << "capitalizeIfAllCaps" << std::endl;
+    //std::cout << "capitalizeIfAllCaps" << std::endl;
     bool allCaps = true;
     for (wchar_t c : str) {
         if (!std::iswupper(c)) {
@@ -935,14 +935,14 @@ std::wstring capitalizeIfAllCaps(const std::wstring& str) {
 }
 
 std::wstring toLower(const std::wstring& str) {
-    //////////////std::cout << "toLower" << std::endl;
+    //std::cout << "toLower" << std::endl;
     std::wstring lowerStr = str;
     std::transform(lowerStr.begin(), lowerStr.end(), lowerStr.begin(), ::towlower);
     return lowerStr;
 }
 
 void ShowTooltip(HWND hwnd, const wchar_t* message) {
-    //////////////std::cout << "ShowTooltip" << std::endl;
+    //std::cout << "ShowTooltip" << std::endl;
     TOOLINFO ti = { 0 };
     ti.cbSize = sizeof(TOOLINFO);
     ti.uFlags = TTF_SUBCLASS | TTF_CENTERTIP;
@@ -1060,7 +1060,7 @@ void CreateArrangeOnScreenMenu(HMENU hMenu, bool forceRecreate = true) {
 
 // Function to check if the windows have changed
 bool HasWindowsChanged() {
-    //////////////std::cout << "HasWindowsChanged" << std::endl;
+    //std::cout << "HasWindowsChanged" << std::endl;
     // Retrieve the current open windows
     auto newWindows = getOpenWindows();
     
@@ -1084,7 +1084,7 @@ bool HasWindowsChanged() {
 
 // Function to move the window to the main monitor
 void MoveWindowToMainMonitor(HWND hwnd) {
-    //////////////std::cout << "MoveWindowToMainMonitor" << std::endl;
+    //std::cout << "MoveWindowToMainMonitor" << std::endl;
     //MessageBoxW(hwnd, L"aha1", L"Debug Info", MB_OK);
     WINDOWPLACEMENT wp;     // Überprüfe, ob das Fenster maximiert ist
     wp.length = sizeof(WINDOWPLACEMENT);
@@ -1166,7 +1166,7 @@ void AdjustWindowToFitMenu(HWND hwnd) {
 
 // Function to allow sorting case-insensitive
 bool caseInsensitiveCompare(const std::wstring& a, const std::wstring& b) {
-    //////////////std::cout << "caseInsensitiveCompare" << std::endl;
+    //std::cout << "caseInsensitiveCompare" << std::endl;
     std::wstring lowerA = a;
     std::wstring lowerB = b;
     std::transform(lowerA.begin(), lowerA.end(), lowerA.begin(), ::towlower);
@@ -1175,14 +1175,14 @@ bool caseInsensitiveCompare(const std::wstring& a, const std::wstring& b) {
 }
 
 int extractLastFiveDigits(int number) {
-    if (number < 100000) {
+    if (number < 0) {
         return 0;
     }
     return number % 100000;
 }
 
 void SetEditPlaceholder(HWND hwndEdit, const std::wstring& placeholder) {
-    //////////////std::cout << "SetEditPlaceholder" << std::endl;
+    //std::cout << "SetEditPlaceholder" << std::endl;
     SetWindowText(hwndEdit, placeholder.c_str());
     SendMessage(hwndEdit, EM_SETSEL, 0, -1); // Markiere den gesamten Text
     SendMessage(hwndEdit, EM_SETSEL, -1, -1); // Entferne die Markierung
@@ -1190,7 +1190,7 @@ void SetEditPlaceholder(HWND hwndEdit, const std::wstring& placeholder) {
 
 // Function to allow on-mouse-over tooltip
 HWND CreateTooltip(HWND hwndParent) {
-    //////////////std::cout << "CreateTooltip" << std::endl;
+    //std::cout << "CreateTooltip" << std::endl;
     HWND hwndTT = CreateWindowEx(WS_EX_TOPMOST, TOOLTIPS_CLASS, NULL,
         WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP,        
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
@@ -1204,7 +1204,7 @@ HWND CreateTooltip(HWND hwndParent) {
 
 // Function to update the window list
 void UpdateWindowList(HWND hwnd) {
-    //////////////std::cout << "UpdateWindowList" << std::endl;
+    //std::cout << "UpdateWindowList" << std::endl;
     // Fensterinhalt löschen
     RECT rect;
     GetClientRect(hwnd, &rect);
@@ -1384,7 +1384,7 @@ void UpdateWindowList(HWND hwnd) {
 
 // Function to adjust the window size
 void AdjustWindowSize(HWND hwnd) {
-    //////////////std::cout << "AdjustWindowSize" << std::endl;
+    //std::cout << "AdjustWindowSize" << std::endl;
     RECT rect; // Declaration of a RECT structure to store the window size
     GetWindowRect(hwnd, &rect);
     int xPos = rect.left;
@@ -1416,7 +1416,7 @@ void AdjustWindowSize(HWND hwnd) {
         defaultYPos = newYPos;*/
         newHeight = screenHeight - yPos - getTaskbarHeight(hwnd);
     }
-    //////std::cout << previousHeight << " " << newHeight << std::endl;
+    //std::cout << previousHeight << " " << newHeight << std::endl;
     if (previousHeight != newHeight) 
     {
         newHeight = std::max(newHeight, 100);
@@ -1579,8 +1579,9 @@ void InitializeMenu(HWND hwnd) {
 
     SetMenu(hwnd, hMenu);
 }
+
 void UpdateDynamicMenus(HWND hwnd) {
-    //////////////std::cout << "UpdateDynamicMenus" << std::endl;
+    //std::cout << "UpdateDynamicMenus" << std::endl;
     // Entferne die alten dynamischen Einträge
     // Hier musst du die Positionen der dynamischen Einträge kennen
     // Angenommen, sie sind an den Positionen 3 und 4
@@ -1597,7 +1598,7 @@ void UpdateDynamicMenus(HWND hwnd) {
 }
 
 void InvalidateWindow(HWND hwnd) {
-    //////////////std::cout << "InvalidateWindow" << std::endl;
+    //std::cout << "InvalidateWindow" << std::endl;
     /*if (!isRedrawPending) {
         isRedrawPending = true;
         InvalidateWindow(hwnd);
@@ -1606,7 +1607,7 @@ void InvalidateWindow(HWND hwnd) {
 }
 
 void RefreshWindowList(HWND hwnd) {
-    //////////////std::cout << "RefreshWindowList" << std::endl;
+    //std::cout << "RefreshWindowList" << std::endl;
     // Invalidate and redraw the window immediately
  
     //RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ERASE); // Invalidate and redraw
@@ -1615,7 +1616,7 @@ void RefreshWindowList(HWND hwnd) {
 }
 
 bool compareWindowsByName(const WindowInfo& a, const WindowInfo& b) {
-    //////////////std::cout << "compareWindowsByName" << std::endl;
+    //std::cout << "compareWindowsByName" << std::endl;
     std::wstring nameA = a.title;
     std::wstring nameB = b.title;
     std::transform(nameA.begin(), nameA.end(), nameA.begin(), ::tolower);
@@ -1625,7 +1626,7 @@ bool compareWindowsByName(const WindowInfo& a, const WindowInfo& b) {
 
 // Function to confirm closing windows
 bool ConfirmClose(HWND parentHwnd) {
-    //////////////std::cout << "ConfirmClose" << std::endl;
+    //std::cout << "ConfirmClose" << std::endl;
     // Bringe das Parent-Fenster in den Vordergrund
     SetForegroundWindow(parentHwnd);
 
@@ -1638,7 +1639,7 @@ bool ConfirmClose(HWND parentHwnd) {
 }
 
 void SearchAndCheck(const std::wstring& searchString, HWND hwnd) {
-    //////////////std::cout << "SearchAndCheck" << std::endl;
+    //std::cout << "SearchAndCheck" << std::endl;
     std::wstring lowerSearchString = toLower(searchString);
 
     // Setze alle Checkboxen auf "unchecked" und klappe alle Prozesse zu
@@ -1667,6 +1668,7 @@ void SearchAndCheck(const std::wstring& searchString, HWND hwnd) {
                 if (windowMatch) {
                     //window.checked = true;
                     window.visible = true; // Setze das sichtbare Attribut auf true, wenn es übereinstimmt
+                    //std::cout << window.visible << std::endl;
                     expandedState[processName] = true; // Klappe den Prozess auf, wenn ein Fenster übereinstimmt
                     //ShowWindow(hGoToButton, SW_HIDE); // Hat funktioniert, aber braucht es nicht
                     foundAnything = true;
@@ -1711,7 +1713,7 @@ void SearchAndCheck(const std::wstring& searchString, HWND hwnd) {
 }
 
 void simulateWindowsKeyPress() {
-    //////////////std::cout << "simulateWindowsKeyPress" << std::endl;
+    //std::cout << "simulateWindowsKeyPress" << std::endl;
     INPUT inputs[2] = {};
 
     inputs[0].type = INPUT_KEYBOARD;
@@ -1725,7 +1727,7 @@ void simulateWindowsKeyPress() {
 }
 
 void simulateTextInput(const std::wstring& text) {
-    //////////////std::cout << "simulateTextInput" << std::endl;
+    //std::cout << "simulateTextInput" << std::endl;
     INPUT* inputs = new INPUT[text.length() * 2];
 
     for (size_t i = 0; i < text.length(); ++i) {
@@ -1746,7 +1748,7 @@ void simulateTextInput(const std::wstring& text) {
 }
 
 void SearchAndCheckErase(HWND hwnd) {
-    //////////////std::cout << "SearchAndCheckErase" << std::endl;
+    //std::cout << "SearchAndCheckErase" << std::endl;
     for (size_t i = 0; i < processNames.size(); ++i) {
         const auto& processName = processNames[i];
         bool AlreadyOneChecked = false;
@@ -1793,7 +1795,7 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
     RegisterClass(&wc);
 
     auto end = std::chrono::high_resolution_clock::now();
-    //////std::cout << "RegisterClass: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
+    //std::cout << "RegisterClass: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
     start = std::chrono::high_resolution_clock::now();
 
     RECT screenRect;
@@ -1808,7 +1810,7 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
         pt.y = screenRect.bottom - height;
 
     end = std::chrono::high_resolution_clock::now();
-    //////std::cout << "Calculate dimensions: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
+    //std::cout << "Calculate dimensions: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
     start = std::chrono::high_resolution_clock::now();
 
     HWND hwnd = CreateWindowEx(
@@ -1824,7 +1826,7 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
     );
 
     end = std::chrono::high_resolution_clock::now();
-    //////std::cout << "CreateWindowEx: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
+    //std::cout << "CreateWindowEx: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
     start = std::chrono::high_resolution_clock::now();
 
     // Set WS_EX_COMPOSITED style for double buffering
@@ -1833,7 +1835,7 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
     SetWindowPos(hwnd, HWND_TOPMOST, pt.x, pt.y, width + 10, height, SWP_SHOWWINDOW);
 
     end = std::chrono::high_resolution_clock::now();
-    //////std::cout << "SetWindowLongPtr and SetWindowPos: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
+    //std::cout << "SetWindowLongPtr and SetWindowPos: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
 
     // Perform additional setup in a separate thread
     std::thread([hwnd, width, height]() {
@@ -1844,14 +1846,14 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
         SetWindowRgn(hwnd, hRgn, TRUE);
 
         auto end = std::chrono::high_resolution_clock::now();
-        //////std::cout << "CreateRoundRectRgn and SetWindowRgn: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
+        //std::cout << "CreateRoundRectRgn and SetWindowRgn: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
         start = std::chrono::high_resolution_clock::now();
 
         // Schwarzen Rahmen hinzufügen
         SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 255, LWA_COLORKEY);
 
         end = std::chrono::high_resolution_clock::now();
-        //////std::cout << "SetLayeredWindowAttributes: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
+        //std::cout << "SetLayeredWindowAttributes: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
         start = std::chrono::high_resolution_clock::now();
 
         // Schatten hinzufügen
@@ -1859,7 +1861,7 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
         DwmExtendFrameIntoClientArea(hwnd, &margins);
 
         end = std::chrono::high_resolution_clock::now();
-        //////std::cout << "DwmExtendFrameIntoClientArea: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
+        //std::cout << "DwmExtendFrameIntoClientArea: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
         start = std::chrono::high_resolution_clock::now();
 
         // Blur-Effekt hinzufügen
@@ -1870,12 +1872,12 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
         DwmEnableBlurBehindWindow(hwnd, &bb);
 
         end = std::chrono::high_resolution_clock::now();
-        //////std::cout << "DwmEnableBlurBehindWindow: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
+        //std::cout << "DwmEnableBlurBehindWindow: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
 
         SetTimer(hwnd, TRAY_CONTEXTMENU_TIMER_ID, TRAY_CONTEXTMENU_TIMER_ID_time, NULL);
 
         end = std::chrono::high_resolution_clock::now();
-        //////std::cout << "SetTimer: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
+        //std::cout << "SetTimer: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
 
         // Only set foreground and focus if necessary
         if (GetForegroundWindow() != hwnd) {
@@ -1884,7 +1886,7 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
         }
 
         end = std::chrono::high_resolution_clock::now();
-        //////std::cout << "SetForegroundWindow and SetFocus: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
+        //std::cout << "SetForegroundWindow and SetFocus: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
     }).detach();
 }
 
@@ -1901,10 +1903,10 @@ void PrintScrollInfo(HWND hwnd) {
         int scrollPos = si.nPos;
         int trackPos = si.nTrackPos;
 
-        // Print the scrollbar information using ////std::cout
-        ////std::cout << "Min: " << minPos << ", Max: " << maxPos
-        ////std::cout << ", Page Size: " << pageSize << ", Scroll Pos: " << scrollPos
-        ////std::cout << ", Track Pos: " << trackPos << std::endl;
+        // Print the scrollbar information using //std::cout
+        //std::cout << "Min: " << minPos << ", Max: " << maxPos
+        //std::cout << ", Page Size: " << pageSize << ", Scroll Pos: " << scrollPos
+        //std::cout << ", Track Pos: " << trackPos << std::endl;
     } else {
         // Handle error
         std::cerr << "Failed to get scroll info" << std::endl;
@@ -2227,7 +2229,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 RECT screenRect = GetScreenRect(screenIndex);
                 int screenWidth = screenRect.right - screenRect.left;
                 int screenHeight = screenRect.bottom - screenRect.top - getTaskbarHeight(hwnd);
-                ////////////std::cout << "screenWidth: " << screenWidth << std::endl;
+                //std::cout << "screenWidth: " << screenWidth << std::endl;
 
                 int numWindows = 0;
                 for (auto& entry : processWindowsMap) {
@@ -2238,29 +2240,29 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                         }
                     }
                 }
-        ////////////std::cout << "numWindows: " << numWindows << std::endl;
+        //std::cout << "numWindows: " << numWindows << std::endl;
                 int cols = static_cast<int>(ceil(sqrt(numWindows))); // Calculate the number of columns
                 int rows = (numWindows + cols - 1) / cols; // Calculate the number of rows
-        ////////////std::cout << "start0: " << std::endl;
-        ////////////std::cout << "screenWidth: " << screenWidth << std::endl;
-        ////////////std::cout << "cols: " << cols << std::endl;
-        ////////////std::cout << "screenHeight: " << screenHeight << std::endl;
-        ////////////std::cout << "rows: " << rows << std::endl;
+        //std::cout << "start0: " << std::endl;
+        //std::cout << "screenWidth: " << screenWidth << std::endl;
+        //std::cout << "cols: " << cols << std::endl;
+        //std::cout << "screenHeight: " << screenHeight << std::endl;
+        //std::cout << "rows: " << rows << std::endl;
                 int windowWidth = (screenWidth) / cols; // Calculate the window width
                 int windowHeight = (screenHeight) / rows; // Calculate the window height
-        ////////////std::cout << "start0a: " << std::endl;
+        //std::cout << "start0a: " << std::endl;
                 int x = 0, y = 0; // Initialize the X and Y positions
                 int maxAdjustedWidth = 0;
                 int minAdjustedWidth = screenWidth;
                 numWindows = 0;
-                ////////////std::cout << "start: " << std::endl;
+                //std::cout << "start: " << std::endl;
                 // Zuerst die Breite des breitesten Fensters ermitteln
                 for (const auto& entry : processWindowsMap) { // Iterate through all processes
-                    ////////////std::cout << "start1: " << std::endl;
+                    //std::cout << "start1: " << std::endl;
                     for (const auto& window : entry.second) { // Iterate through all windows of a process
-                        ////////////std::cout << "start2: " << std::endl;
+                        //std::cout << "start2: " << std::endl;
                         if (window.processName == processNames[index]) { // Check if the window is selected
-                            ////////////std::cout << "start3: " << std::endl;
+                            //std::cout << "start3: " << std::endl;
                             if (IsIconic(window.hwnd) || IsZoomed(window.hwnd)) ShowWindow(window.hwnd, SW_RESTORE); // Restore the window if minimized or maximized
                             //SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
                             MoveWindowToScreen(window.hwnd, screenIndex);
@@ -2312,11 +2314,11 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                         }
                     }
                 }
-                ////////////std::cout << "minAdjustedWidth: " << minAdjustedWidth << std::endl;
-                ////////////std::cout << "cols: " << cols << std::endl;
+                //std::cout << "minAdjustedWidth: " << minAdjustedWidth << std::endl;
+                //std::cout << "cols: " << cols << std::endl;
                 // Anzahl der Fenster nebeneinander und die Anzahl der Fensterreihen berechnen
                 cols = screenWidth / std::max(maxAdjustedWidth, screenWidth/cols);
-                ////////////std::cout << "cols: " << cols << std::endl;                
+                //std::cout << "cols: " << cols << std::endl;                
                 rows = (numWindows + cols - 1) / cols;
                 windowWidth = screenWidth / cols; // Calculate the window width
                 windowHeight = (screenHeight) / rows; // Calculate the window height
@@ -2440,18 +2442,18 @@ void UpdateControlPositions(HWND hwnd) {
 
 // Window procedure
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-    //////////////std::cout << "WindowProc" << std::endl;
+    //std::cout << "WindowProc" << std::endl;
     static int scrollPos = 0; // Static variable to store the scroll position
     int id; // Variable to store the ID
     static HIMAGELIST hImageList;
     static HICON hIcon1;
     static HMENU hMenu = NULL;
 
-    //////////std::cout << "uMsg:" << uMsg << std::endl;
+    //std::cout << "uMsg:" << uMsg << std::endl;
 
     switch (uMsg) { // Check the messages
         case WM_CREATE: {
-            //////////////std::cout << "WM_CREATE" << std::endl;
+            //std::cout << "WM_CREATE" << std::endl;
             CreateTrayIcon(hwnd);
             if (!initialized) {
                 UpdateWindowList(hwnd);
@@ -2543,125 +2545,131 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_KEYDOWN: {
-            ////std::cout << "WM_KEYDOWN" << std::endl;
+            //std::cout << "WM_KEYDOWN" << std::endl;
             switch (wParam)
             {
                 case VK_UP:
                 {
-                    ////std::cout << "VK_UP pressed" << std::endl;
-                    //if (highlightedRow > -1)
-                        ////std::cout << "Initial State: highlightedRow=" << highlightedRow << ", highlightedWindowRow=" << highlightedWindowRow << ", expandedState=" << expandedState[processNames[highlightedRow]] << std::endl;
-
                     if (highlightedRow > 0 && highlightedRow <= processNames.size() &&
-                        !expandedState[processNames[highlightedRow - 1]] &&
+                        !expandedState.at(processNames.at(highlightedRow - 1)) &&
                         highlightedWindowRow == -1)
                     {
-                        // no change to highlightedWindowRow
                         highlightedRow--;
-                        ////std::cout << "Case 11: highlightedRow updated to " << (highlightedRow - 1) << std::endl;
                     }
                     else if (highlightedRow == 0 &&
-                            !expandedState[processNames[highlightedRow]] &&
+                            !expandedState.at(processNames.at(highlightedRow)) &&
                             highlightedWindowRow == -1)
                     {
-                        // no change to highlightedWindowRow
                         highlightedRow = 0;
-                        ////std::cout << "Case 12: highlightedRow updated to " << highlightedRow << std::endl;
                     }
                     else if (highlightedRow > 0 && highlightedRow <= processNames.size() && 
-                            expandedState[processNames[highlightedRow - 1]] &&
+                            expandedState.at(processNames.at(highlightedRow - 1)) &&
                             highlightedWindowRow == -1)
                     {
-                        highlightedWindowRow = (highlightedRow - 1) * 100000 + (processWindowsMap[processNames[highlightedRow - 1]].size() - 1);
+                        highlightedWindowRow = (highlightedRow - 1) * 100000 + (processWindowsMap.at(processNames.at(highlightedRow - 1)).size() - 1);
+                        for (auto counter = processWindowsMap.at(processNames.at(highlightedRow - 1)).size() - 1; counter >= 0; counter--)
+                        {
+                            if (!processWindowsMap.at(processNames.at(highlightedRow - 1)).at(counter).visible && !processWindowsMap.at(processNames.at(highlightedRow - 1)).at(counter).checked)
+                                highlightedWindowRow--;
+                            else
+                                break;
+                        }
                         highlightedRow--;
-                        ////std::cout << "Case 1: highlightedWindowRow updated to " << highlightedWindowRow << ", highlightedRow updated to " << (highlightedRow - 1) << std::endl;
                     }
                     else if (highlightedRow == 0 &&
                             highlightedWindowRow == -1)
                     {
-                        // no change to highlightedWindowRow
                         highlightedRow = 0;
-                        ////std::cout << "Case 2: highlightedRow updated to " << highlightedRow << std::endl;
                     }
-                    else if (highlightedRow == 0 && highlightedRow <= processNames.size() && expandedState[processNames[highlightedRow]] &&
-                            
-                            processWindowsMap[processNames[highlightedRow]].size() > 1 &&
-                            highlightedWindowRow > highlightedRow * 100000)
+                    else if (highlightedRow == 0 && highlightedRow <= processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
+                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
+                            highlightedWindowRow >= highlightedRow * 100000)
                     {
-                        for (auto &window : processWindowsMap[processNames[highlightedRow]])
+                        int currentCounter = extractLastFiveDigits(highlightedWindowRow);
+                        //std::cout << currentCounter << " " << highlightedWindowRow << std::endl;
+                        auto &windows = processWindowsMap.at(processNames.at(highlightedRow));
+                        int counter;
+                        for (counter = currentCounter-1; counter >= 0; counter--)
                         {
-                            if (!window.visible) highlightedWindowRow--;
+                            auto &window = windows.at(counter);
+                            //std::cout << counter << " " << window.visible << " " << window.checked << std::endl;
+                            if (!window.visible && !window.checked)
+                                highlightedWindowRow--;
+                            else
+                            {
+                                break;
+                            }
                         }
-                        highlightedWindowRow--;
-                        ////std::cout << "Case 3: highlightedWindowRow updated to " << highlightedWindowRow << std::endl;
-                        // no change to highlightedRow
+                        if (counter < 0) 
+                        {
+                            highlightedWindowRow = -1;
+                        }
+                        else
+                            highlightedWindowRow--;
+                        //std::cout << highlightedWindowRow << std::endl;
                     }
-                    else if (highlightedRow > 0 && highlightedRow <= processNames.size() && expandedState[processNames[highlightedRow]] &&
-                            
-                            processWindowsMap[processNames[highlightedRow]].size() > 1 &&
-                            highlightedWindowRow > highlightedRow * 100000)
+                    else if (highlightedRow > 0 && highlightedRow <= processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
+                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
+                            highlightedWindowRow >= highlightedRow * 100000)
                     {
-                        for (auto &window : processWindowsMap[processNames[highlightedRow]])
+                        int currentCounter = extractLastFiveDigits(highlightedWindowRow);
+                        //std::cout << currentCounter << " " << highlightedWindowRow << std::endl;
+                        auto &windows = processWindowsMap.at(processNames.at(highlightedRow));
+                        int counter;
+                        for (counter = currentCounter-1; counter >= 0; counter--)
                         {
-                            if (!window.visible) highlightedWindowRow--;
+                            auto &window = windows.at(counter);
+                            //std::cout << counter << " " << window.visible << " " << window.checked << std::endl;
+                            if (!window.visible && !window.checked)
+                                highlightedWindowRow--;
+                            else
+                            {
+                                break;
+                            }
                         }
-                        highlightedWindowRow--;
-                        ////std::cout << "Case 4: highlightedWindowRow updated to " << highlightedWindowRow << std::endl;
-                        // no change to highlightedRow
+                        if (counter < 0) 
+                        {
+                            highlightedWindowRow = -1;
+                        }
+                        else
+                            highlightedWindowRow--;
+                        //std::cout << highlightedWindowRow << std::endl;
                     }
-                    else if (expandedState[processNames[highlightedRow]] &&
+                    else if (expandedState.at(processNames.at(highlightedRow)) &&
                             highlightedRow == 0 &&
-                            processWindowsMap[processNames[highlightedRow]].size() > 1 &&
+                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
                             highlightedWindowRow == highlightedRow * 100000)
                     {
                         highlightedWindowRow = -1;
-                        ////std::cout << "Case 5: highlightedWindowRow updated to " << highlightedWindowRow << std::endl;
-                        // no change to highlightedRow
                     }
-                    else if (highlightedRow > 0 && highlightedRow <= processNames.size() && expandedState[processNames[highlightedRow]]
-                            &&
-                            processWindowsMap[processNames[highlightedRow]].size() > 1 &&
+                    else if (highlightedRow > 0 && highlightedRow <= processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
+                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
                             highlightedWindowRow == highlightedRow * 100000)
                     {
                         highlightedWindowRow = -1;
-                        ////std::cout << "Case 6: highlightedWindowRow updated to " << highlightedWindowRow << std::endl;
-                        // no change to highlightedRow
                     }
-                    else if (highlightedRow == 0 && highlightedRow <= processNames.size() && expandedState[processNames[highlightedRow]]
-                             &&
-                            processWindowsMap[processNames[highlightedRow]].size() <= 1)
+                    else if (highlightedRow == 0 && highlightedRow <= processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
+                            processWindowsMap.at(processNames.at(highlightedRow)).size() <= 1)
                     {
                         highlightedWindowRow = -1;
-                        ////std::cout << "Case 7: highlightedWindowRow updated to " << highlightedWindowRow << std::endl;
-                        // no change to highlightedRow
                     }
-                    else if (highlightedRow > 0 && highlightedRow <= processNames.size() && expandedState[processNames[highlightedRow]]
-                            &&
-                            processWindowsMap[processNames[highlightedRow]].size() <= 1)
+                    else if (highlightedRow > 0 && highlightedRow <= processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
+                            processWindowsMap.at(processNames.at(highlightedRow)).size() <= 1)
                     {
                         highlightedWindowRow = -1;
-                        ////std::cout << "Case 8: highlightedWindowRow updated to " << highlightedWindowRow << std::endl;
-                        // no change to highlightedRow
                     }
-                    else if (highlightedRow > 0 && !expandedState[processNames[highlightedRow]]
-                            )
+                    else if (highlightedRow > 0 && !expandedState.at(processNames.at(highlightedRow)))
                     {
                         highlightedWindowRow = -1;
                         highlightedRow--;
-                        ////std::cout << "Case 9: highlightedWindowRow updated to " << highlightedWindowRow << ", highlightedRow updated to " << highlightedRow << std::endl;
                     }
-                    else if (highlightedRow == 0 && !expandedState[processNames[highlightedRow]]
-                            )
+                    else if (highlightedRow == 0 && !expandedState.at(processNames.at(highlightedRow)))
                     {
                         highlightedWindowRow = -1;
                         highlightedRow = 0;
-                        ////std::cout << "Case 10: highlightedWindowRow updated to " << highlightedWindowRow << ", highlightedRow updated to " << highlightedRow << std::endl;
                     }
-                    ////std::cout << "VK_UP END" << std::endl;
-
-                    ////std::cout << "highlightedWindowRow: " << highlightedWindowRow << std::endl;
                     if (highlightedWindowRow != -1)
-                        if (highlightedRow < (processNames.size() - 3) + processWindowsMap[processNames[highlightedRow]].size())
+                        if (highlightedRow < (processNames.size() - 3) + processWindowsMap.at(processNames.at(highlightedRow)).size())
                             setScrollToNewPos(hwnd, 0);
                         else if (highlightedRow < processNames.size() - 3)
                             setScrollToNewPos(hwnd, 0);
@@ -2669,61 +2677,120 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 break;
                 case VK_DOWN:
                 {
-                    //if (highlightedRow > -1)
-                        ////std::cout << highlightedRow << " " << highlightedWindowRow << " " << expandedState[processNames[highlightedRow]] << std::endl;
-                    if (highlightedRow >= 0 && highlightedRow < static_cast<int>(processNames.size() - 1))
+                    if (highlightedRow >= 0 && highlightedRow < processNames.size() - 1 &&
+                        !expandedState.at(processNames.at(highlightedRow)) &&
+                        highlightedWindowRow == -1)
                     {
-                        if (expandedState[processNames[highlightedRow]])
-                            if (highlightedWindowRow < highlightedRow * 100000 + static_cast<int>(processWindowsMap[processNames[highlightedRow]].size()) - 1)
-                            {
-                                if (highlightedWindowRow == -1)
-                                    highlightedWindowRow = highlightedRow * 100000;
-                                else
-                                {
-                                    for (auto &window : processWindowsMap[processNames[highlightedRow]])
-                                    {
-                                        if (!window.visible) highlightedWindowRow++;
-                                    }
-                                    highlightedWindowRow++;
-                                }
-                            }
+                        //std::cout << "Case 1: highlightedRow incremented from " << highlightedRow << " to " << (highlightedRow + 1) << std::endl;
+                        highlightedRow++;
+                    }
+                    else if (highlightedRow == processNames.size() - 1 &&
+                            !expandedState.at(processNames.at(highlightedRow)) &&
+                            highlightedWindowRow == -1)
+                    {
+                        //std::cout << "Case 2: highlightedRow set to " << highlightedRow << std::endl;
+                        highlightedRow = processNames.size() - 1;
+                    }
+                    else if (highlightedRow >= 0 && highlightedRow < processNames.size() - 1 &&
+                            expandedState.at(processNames.at(highlightedRow)) &&
+                            highlightedWindowRow == -1)
+                    {
+                        highlightedWindowRow = (highlightedRow) * 100000;
+                        //std::cout << "Case 3: highlightedWindowRow set to " << highlightedWindowRow << std::endl;
+                        for (auto counter = 0; counter < processWindowsMap.at(processNames.at(highlightedRow)).size(); counter++)
+                        {
+                            if (!processWindowsMap.at(processNames.at(highlightedRow)).at(counter).visible && 
+                                !processWindowsMap.at(processNames.at(highlightedRow)).at(counter).checked)
+                                highlightedWindowRow++;
+                            else
+                                break;
+                        }
+                    }
+                    else if (highlightedRow == processNames.size() - 1 &&
+                            highlightedWindowRow == -1)
+                    {
+                        //std::cout << "Case 4: highlightedRow set to " << highlightedRow << std::endl;
+                        highlightedRow = processNames.size() - 1;
+                    }
+                    else if (highlightedRow >= 0 && highlightedRow < processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
+                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
+                            highlightedWindowRow >= highlightedRow * 100000)
+                    {
+                        int currentCounter = extractLastFiveDigits(highlightedWindowRow);
+                        auto &windows = processWindowsMap.at(processNames.at(highlightedRow));
+                        int counter;
+                        for (counter = currentCounter + 1; counter < windows.size(); counter++)
+                        {
+                            auto &window = windows.at(counter);
+                            //std::cout << counter << " " << window.visible << " " << window.checked << std::endl;
+                            if (!window.visible && !window.checked)
+                                highlightedWindowRow++;
                             else
                             {
-                                highlightedRow++;
-                                highlightedWindowRow = -1;
+                                break;
                             }
+                        }
+                        if (counter >= processWindowsMap.at(processNames.at(highlightedRow)).size())
+                        {
+                            highlightedWindowRow = -1;
+                            highlightedRow++;
+                            //std::cout << "Case 5: highlightedWindowRow set to -1" << std::endl;
+                        }
                         else
                         {
-                            highlightedRow++;
-                            highlightedWindowRow = -1;
+                            highlightedWindowRow++;
+                            //std::cout << "Case 5: highlightedWindowRow incremented to " << highlightedWindowRow << std::endl;
                         }
-                        InvalidateRect(hwnd, NULL, TRUE);
                     }
-                    else
+                    else if (expandedState.at(processNames.at(highlightedRow)) &&
+                            highlightedRow == processNames.size() - 1 &&
+                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
+                            highlightedWindowRow == (highlightedRow + 1) * 100000)
                     {
-                        highlightedRow = processNames.size() - 1;
-                        if (highlightedRow >= 0 && expandedState[processNames[highlightedRow]])
-                            if (highlightedWindowRow < highlightedRow * 100000 + static_cast<int>(processWindowsMap[processNames[highlightedRow]].size()) - 1)
-                            {
-                                if (highlightedWindowRow == -1)
-                                    highlightedWindowRow = highlightedRow * 100000;
-                                else
-                                    for (auto &window : processWindowsMap[processNames[highlightedRow]])
-                                    {
-                                        if (!window.visible) highlightedWindowRow++;
-                                    }
-                                    highlightedWindowRow++;
-                            }
+                        highlightedWindowRow = -1;
+                        //std::cout << "Case 6: highlightedWindowRow set to -1" << std::endl;
                     }
-                    ////std::cout << "highlightedWindowRow: " << highlightedWindowRow << std::endl;
+                    else if (highlightedRow >= 0 && highlightedRow < processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
+                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
+                            highlightedWindowRow == highlightedRow * 100000)
+                    {
+                        highlightedWindowRow = -1;
+                        //std::cout << "Case 7: highlightedWindowRow set to -1" << std::endl;
+                    }
+                    else if (highlightedRow == processNames.size() - 1 && expandedState.at(processNames.at(highlightedRow)) &&
+                            processWindowsMap.at(processNames.at(highlightedRow)).size() <= 1)
+                    {
+                        highlightedWindowRow = -1;
+                        highlightedRow++;
+                        //std::cout << "Case 8: highlightedWindowRow set to -1" << std::endl;
+                    }
+                    else if (highlightedRow >= 0 && highlightedRow < processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
+                            processWindowsMap.at(processNames.at(highlightedRow)).size() <= 1)
+                    {
+                        highlightedWindowRow = -1;
+                        highlightedRow++;
+                        //std::cout << "Case 9: highlightedWindowRow set to -1" << std::endl;
+                    }
+                    else if (highlightedRow >= 0 && !expandedState.at(processNames.at(highlightedRow)))
+                    {
+                        highlightedWindowRow = -1;
+                        //std::cout << "Case 10: highlightedWindowRow set to -1, highlightedRow incremented from " << highlightedRow << " to " << (highlightedRow + 1) << std::endl;
+                        highlightedRow++;
+                    }
+                    else if (highlightedRow == processNames.size() - 1 && !expandedState.at(processNames.at(highlightedRow)))
+                    {
+                        highlightedWindowRow = -1;
+                        //std::cout << "Case 11: highlightedWindowRow set to -1, highlightedRow set to " << highlightedRow << std::endl;
+                        highlightedRow = processNames.size() - 1;
+                    }
+
                     if (highlightedWindowRow != -1)
-                        if (highlightedRow + extractLastFiveDigits(highlightedWindowRow) > 5 && highlightedRow < (processNames.size() - 1) + processWindowsMap[processNames[highlightedRow]].size())
+                        if (highlightedRow + extractLastFiveDigits(highlightedWindowRow) > 5 && highlightedRow < (processNames.size() - 1) + processWindowsMap.at(processNames.at(highlightedRow)).size())
                             setScrollToNewPos(hwnd, 1);
                         else if (highlightedRow > 5 && highlightedRow < processNames.size() - 1)
                             setScrollToNewPos(hwnd, 1);
-
-                    break;
                 }
+                break;
                 case VK_RETURN:
                 {
                     if (highlightedWindowRow != -1)
@@ -2738,9 +2805,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         //std::wcout << L"Process key: " << processKey << std::endl;
                         int counter = 0;
                         for (auto &window : processWindowsMap[processName])
-                        {////std::cout << "counter: " << counter << "  extractLastFiveDigits(highlightedWindowRow): " << extractLastFiveDigits(highlightedWindowRow) << std::endl;
+                        {//std::cout << "counter: " << counter << "  extractLastFiveDigits(highlightedWindowRow): " << extractLastFiveDigits(highlightedWindowRow) << std::endl;
                             if (counter == extractLastFiveDigits(highlightedWindowRow))
-                            {////std::cout << "match" << std::endl;
+                            {//std::cout << "match" << std::endl;
                                 window.checked = !window.checked;
                                 window.visible = true;
                                 //std::wcout << L"Set window.checked to " << checkboxState[processName] << L" for window in processWindowsMap with key " << key << std::endl;
@@ -2931,15 +2998,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             else if ((wParam != VK_UP && wParam != VK_DOWN && IsValidInput(reinterpret_cast<const wchar_t *>(&wParam))) || wParam == VK_BACK || wParam == VK_TAB)
             {
                 HWND hFocusedWindow = GetFocus();
-                ////std::cout << wParam << std::endl;
+                //std::cout << wParam << std::endl;
                 /*if (hFocusedWindow == hEraseButton && wParam == VK_TAB) {
                     // If the focus is on the hEraseButton and the user presses Tab, set focus to hGoToButton
-                    ////std::cout << "hfocusedWindow "<< std::endl;
+                    //std::cout << "hfocusedWindow "<< std::endl;
                     SetFocus(hGoToButton);
                 } else*/
                 /*if (wParam == VK_TAB) {
                     // If the focus is on the hSearchBox and the user presses Tab, set focus to hGoToButton
-                    ////std::cout << "hSearchBox "<< std::endl;
+                    //std::cout << "hSearchBox "<< std::endl;
                     SetFocus(hGoToButton);
                 }*/
                 /*if (hFocusedWindow == hwnd && wParam == VK_TAB) {
@@ -3001,8 +3068,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_TIMER: {
-            //////////////std::cout << "WM_KEYDOWN" << std::endl;
-            //////////std::cout << "WM_TIMER" << std::endl;
+            //std::cout << "WM_KEYDOWN" << std::endl;
+            //std::cout << "WM_TIMER" << std::endl;
             if (wParam == BLINKING_TIMER_ID) {
                 //DestroyWindow(hwnd);
                 blinkState = !blinkState; // Toggle the blink state
@@ -3018,7 +3085,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_DRAWITEM: { // Message when drawing an item
-            //////////////std::cout << "WM_DRAWITEM" << std::endl;
+            //std::cout << "WM_DRAWITEM" << std::endl;
             /*LPDRAWITEMSTRUCT lpDrawItem = (LPDRAWITEMSTRUCT)lParam; // Draw item structure
             if (lpDrawItem->CtlID >= ID_PROCESSNAMESTART && lpDrawItem->CtlID < ID_PROCESSNAMESTART + processNames.size()) { // Check the ID
                 std::wstring processName = processNames[lpDrawItem->CtlID - ID_PROCESSNAMESTART]; // Retrieve the process name
@@ -3042,7 +3109,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_UPDATE_LIST: { // Message to update the list
-            //////////////std::cout << "WM_UPDATE_LIST" << std::endl;
+            //std::cout << "WM_UPDATE_LIST" << std::endl;
             processWindowsMap.clear(); // Clear the process window map
             processNames.clear(); // Clear the process names
             checkboxState.clear(); // Clear the checkbox state
@@ -3075,7 +3142,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_VSCROLL: {
-            //////////////std::cout << "WM_VSCROLL" << std::endl;
+            //std::cout << "WM_VSCROLL" << std::endl;
             SCROLLINFO si = {};
             si.cbSize = sizeof(si);
             si.fMask = SIF_ALL;
@@ -3101,11 +3168,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
 
         case WM_ERASEBKGND:
-            //////////////std::cout << "WM_ERASEBKGND" << std::endl;
+            //std::cout << "WM_ERASEBKGND" << std::endl;
             return 1; // Hintergrund nicht löschen
 
         case WM_COMMAND: { // Message when a command is executed (e.g., button click)
-            //////////////std::cout << "WM_COMMAND" << std::endl;
+            //std::cout << "WM_COMMAND" << std::endl;
             id = LOWORD(wParam); // Extract the command ID from wParam
             //std::wstring message = L"" + std::to_wstring(id);
             //MessageBoxW(hwnd, message.c_str(), L"Debug Info", MB_OK);
@@ -3424,7 +3491,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     Sleep(100); // Short pause
                 }
             } else if ((id >= ID_ARRANGE && id <= ID_ARRANGE + screenCount) || LOWORD(wParam) == ID_CTRL_N) {//else if (id == 2003) { Check if the ID is 2003 (Arrange)
-                //////////std::cout << "arrange" << std::endl;
+                //std::cout << "arrange" << std::endl;
                 MinimizeToTray(hwnd); // Minimize the window to the tray
                 //MessageBoxW(hwnd, L"aha2", L"Debug Info", MB_OK);
                 ClearTemporaryTiles();
@@ -3439,7 +3506,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     if (globalScreenIndexChosen > monitors.size()) globalScreenIndexChosen = 1;
                     if (monitors.size() > 1) screenIndex = globalScreenIndexChosen - 1;
                 }
-                ////////std::cout << id << " " << screenIndex << std::endl;
+                //std::cout << id << " " << screenIndex << std::endl;
 
                 RECT screenRect = GetScreenRect(screenIndex);
                 //RECT rect; // Declaration of a RECT structure
@@ -3448,7 +3515,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 int screenWidth = screenRect.right - screenRect.left;
                 int screenHeight = screenRect.bottom - screenRect.top - getTaskbarHeight(hwnd);
                 //int screenHeight = GetSystemMetrics(SM_CYSCREEN); // Retrieve the screen height
-                //////////////std::cout << "screenWidth : " << screenWidth << std::endl;
+                //std::cout << "screenWidth : " << screenWidth << std::endl;
 
                 int numWindows = 0; // Counter for the number of windows
                 for (auto& entry : processWindowsMap) { // Iterate through all processes
@@ -3470,7 +3537,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 int maxAdjustedWidth = 0;
                 int minAdjustedWidth = screenWidth;
                 numWindows = 0;
-////////std::cout << "arrange1" << std::endl;
+//std::cout << "arrange1" << std::endl;
                 // Zuerst die Breite des breitesten Fensters ermitteln
                 for (const auto& entry : processWindowsMap) { // Iterate through all processes
                     for (const auto& window : entry.second) { // Iterate through all windows of a process
@@ -3511,7 +3578,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             // Berechnete Fenstergröße
                             int adjustedWidth = adjustedRect.right - adjustedRect.left;
                             int adjustedHeight = adjustedRect.bottom - adjustedRect.top;
-                            ////////////std::cout << windowWidth << " " << adjustedWidth << std::endl;
+                            //std::cout << windowWidth << " " << adjustedWidth << std::endl;
                             // Aktualisiere die maximale Breite
                             if (adjustedWidth > maxAdjustedWidth) {
                                 maxAdjustedWidth = adjustedWidth;
@@ -3526,19 +3593,19 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     }
                 }
 
-                //////////////std::cout << "minAdjustedWidth: " << minAdjustedWidth << std::endl;
-                //////////////std::cout << "cols: " << cols << std::endl;
+                //std::cout << "minAdjustedWidth: " << minAdjustedWidth << std::endl;
+                //std::cout << "cols: " << cols << std::endl;
                 // Anzahl der Fenster nebeneinander und die Anzahl der Fensterreihen berechnen
-                ////////std::cout << maxAdjustedWidth << " " << screenWidth << " " << cols << std::endl;
+                //std::cout << maxAdjustedWidth << " " << screenWidth << " " << cols << std::endl;
                 cols = screenWidth / std::max(maxAdjustedWidth, screenWidth/cols);
-                                ////////std::cout << cols << std::endl;
-                //////////////std::cout << "cols: " << cols << std::endl;                
+                                //std::cout << cols << std::endl;
+                //std::cout << "cols: " << cols << std::endl;                
                 rows = (numWindows + cols - 1) / cols;
-                                ////////std::cout << rows << std::endl;
+                                //std::cout << rows << std::endl;
                 windowWidth = screenWidth / cols; // Calculate the window width
-                ////////std::cout << windowWidth << std::endl;
+                //std::cout << windowWidth << std::endl;
                 windowHeight = (screenHeight) / rows; // Calculate the window height
-////////std::cout << windowHeight << std::endl;
+//std::cout << windowHeight << std::endl;
                 // Fenster anordnen
                 x = 0;
                 y = 0;
@@ -3630,7 +3697,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     }
                 }
                 InvalidateRect(hwnd, NULL, TRUE);
-                    ////std::cout << "Invalidated rect for process: " << processName << std::endl;
+                    //std::cout << "Invalidated rect for process: " << processName << std::endl;
                 
             
             } else if ((id >= ID_MOVE_TO_SCREEN_BASE && id <= ID_MOVE_TO_SCREEN_BASE + screenCount) || LOWORD(wParam) == ID_CTRL_M) { // Check if the ID is 2004ff (Move to Screen x)
@@ -3781,7 +3848,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_LBUTTONDOWN: { // Message when the left mouse button is pressed
-            //////////////std::cout << "WM_LBUTTONDOWN" << std::endl;
+            //std::cout << "WM_LBUTTONDOWN" << std::endl;
             isScrolling = true; // Start scrolling
             SetCapture(hwnd); // Capture the mouse to receive all mouse events
             lastMousePos.x = GET_X_LPARAM(lParam); // Store the X position of the mouse
@@ -3865,42 +3932,42 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_MENUSELECT: {
-            //////////////std::cout << "WM_MENUSELECT" << std::endl;
-            ////////////////std::cout << "Beginne WM_MENUSELECT" << std::endl;
+            //std::cout << "WM_MENUSELECT" << std::endl;
+            //std::cout << "Beginne WM_MENUSELECT" << std::endl;
             // Löschen Sie die temporären Kacheln bei jeder Menüauswahl
             try {
-                ////////////////std::cout << "Vor ClearTemporaryTiles" << std::endl;
+                //std::cout << "Vor ClearTemporaryTiles" << std::endl;
                 ClearTemporaryTiles();
-                ////////////////std::cout << "Nach ClearTemporaryTiles" << std::endl;
+                //std::cout << "Nach ClearTemporaryTiles" << std::endl;
 
                 if (HIWORD(wParam) & MF_MOUSESELECT) {
                     std::vector<MonitorInfo> monitors;
-                    ////////////////std::cout << "Vor EnumDisplayMonitors" << std::endl;
+                    //std::cout << "Vor EnumDisplayMonitors" << std::endl;
                     if (!EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, reinterpret_cast<LPARAM>(&monitors))) {
                         throw std::runtime_error("EnumDisplayMonitors failed");
                     }
-                    ////////////////std::cout << "Nach EnumDisplayMonitors" << std::endl;
+                    //std::cout << "Nach EnumDisplayMonitors" << std::endl;
 
                     int menuIndex = LOWORD(wParam) - ID_ARRANGE;
                     if (menuIndex >= 0 && menuIndex < monitors.size()) {
-                        ////////////////std::cout << "Vor ShowTemporaryTiles" << std::endl;
+                        //std::cout << "Vor ShowTemporaryTiles" << std::endl;
                         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
                         StartShowTemporaryTilesInThread(hwnd, menuIndex);
-                        ////////////////std::cout << "Nach ShowTemporaryTiles" << std::endl;
+                        //std::cout << "Nach ShowTemporaryTiles" << std::endl;
                     }
                     menuIndex = LOWORD(wParam) - ID_MOVE_TO_SCREEN_BASE;
                     if (menuIndex >= 0 && menuIndex < monitors.size()) {
-                        ////////////////std::cout << "Vor ShowTemporaryTiles for Move To Screen" << std::endl;
+                        //std::cout << "Vor ShowTemporaryTiles for Move To Screen" << std::endl;
                         SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
                         globalTotalCheckedIgnore = true;
                         StartShowTemporaryTilesInThread(hwnd, menuIndex);
-                        ////////////////std::cout << "Nach ShowTemporaryTiles for Move To Screen" << std::endl;
+                        //std::cout << "Nach ShowTemporaryTiles for Move To Screen" << std::endl;
                     }
                 }
             } catch (const std::exception& e) {
-                //////////////std::cout << "Error in WM_MENUSELECT: " << e.what() << std::endl;
+                //std::cout << "Error in WM_MENUSELECT: " << e.what() << std::endl;
             }
-            ////////////////std::cout << "Alles gut bei WM_MENUSELECT bis zum Ende" << std::endl;
+            //std::cout << "Alles gut bei WM_MENUSELECT bis zum Ende" << std::endl;
         }
         break;
 
@@ -3916,7 +3983,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;*/
 
         case WM_MOUSEMOVE: { // Message when the mouse is moved
-            //////////////std::cout << "WM_MOUSEMOVE" << std::endl;
+            //std::cout << "WM_MOUSEMOVE" << std::endl;
             if (isScrolling) { // Check if scrolling
                 POINT currentMousePos; // Variable to store the current mouse position
                 currentMousePos.x = GET_X_LPARAM(lParam); // Retrieve the X position of the mouse
@@ -4006,14 +4073,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
     
         case WM_LBUTTONUP: { // Message when the left mouse button is released
-            //////////////std::cout << "WM_LBUTTONUP" << std::endl;
+            //std::cout << "WM_LBUTTONUP" << std::endl;
             isScrolling = false; // Stop scrolling
             ReleaseCapture(); // Release the mouse
         }
         break;
         
         case WM_MOUSEWHEEL: { // Nachricht, wenn das Mausrad gedreht wird
-            //////////////std::cout << "WM_MOUSEWHEEL" << std::endl;
+            //std::cout << "WM_MOUSEWHEEL" << std::endl;
             int delta = GET_WHEEL_DELTA_WPARAM(wParam); // Abrufen der Scroll-Richtung und -Menge
             SCROLLINFO si = {}; // Initialisieren einer SCROLLINFO-Struktur
             si.cbSize = sizeof(si); // Setzen der Größe der Struktur
@@ -4038,7 +4105,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
                 
         case WM_PAINT: {
-            //////////////std::cout << "WM_PAINT" << std::endl;
+            //std::cout << "WM_PAINT" << std::endl;
             isRedrawPending = false; // Reset the flag
             PAINTSTRUCT ps;
             HDC hdc = BeginPaint(hwnd, &ps);
@@ -4306,7 +4373,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_SIZE: { // Message when the window size is changed
-                    //////////////std::cout << "WM_SIZE" << std::endl;
+                    //std::cout << "WM_SIZE" << std::endl;
                     RECT rect; // Declaration of a RECT structure to store the client rectangles
                     GetClientRect(hwnd, &rect); // Retrieve the client rectangles of the window
                     SCROLLINFO si = {}; // Initialize a SCROLLINFO structure
@@ -4347,7 +4414,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
                 break;
         case WM_DESTROY: { // Message when the window is destroyed
-            //////////////std::cout << "WM_DESTROY" << std::endl;
+            //std::cout << "WM_DESTROY" << std::endl;
             UnregisterHotKey(NULL, HOTKEY_ID);
             RemoveTrayIcon(hwnd); // Remove the tray icon
             PostQuitMessage(0); // Quit the application
@@ -4356,7 +4423,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         break;
 
         case WM_CLOSE: { // Message when the window is closed
-            //////////std::cout << "WM_CLOSE" << std::endl;
+            //std::cout << "WM_CLOSE" << std::endl;
             //RemoveTrayIcon(hwnd); // Remove the tray icon (commented out)
             //DestroyWindow(hwnd); // Destroy the window (commented out)
             MinimizeToTray(hwnd); // Minimize the window to the tray
@@ -4366,13 +4433,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
     case WM_TRAYICON:
     case WM_HOTKEY: { 
-        //////////std::cout << "WM_HOTKEY or WM_TRAYICON" << std::endl;
+        //std::cout << "WM_HOTKEY or WM_TRAYICON" << std::endl;
         if (uMsg == WM_HOTKEY && wParam != HOTKEY_ID) {
-            //////////std::cout << "Incorrect hotkey ID" << std::endl;
+            //std::cout << "Incorrect hotkey ID" << std::endl;
             break; // Ensure it's the correct hotkey
         }
         if (lParam == WM_LBUTTONUP || uMsg == WM_HOTKEY) { 
-            //////////std::cout << "Restoring window" << std::endl;
+            //std::cout << "Restoring window" << std::endl;
 
             // Show the window and bring it to the foreground as early as possible
             // Get the screen dimensions
@@ -4394,7 +4461,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             // Restore, move, and bring the window to the foreground in one call
             SetWindowPos(hwnd, HWND_TOP, newX, newY, windowWidth, windowHeight, SWP_SHOWWINDOW);
 
-            // Perform essential operations
+            // Perform essential operations           
             RefreshWindowList(hwnd);
             //AdjustWindowToFitMenu(hwnd);
             //UpdateWindowList(hwnd);
@@ -4402,17 +4469,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             // Perform non-essential operations asynchronously
             std::thread([hwnd]() {
                 AdjustWindowSize(hwnd); 
+                UpdateDynamicMenus(hwnd); 
                 std::vector<BOOL> timerStates(timers.size());
                 RestartTimers(hwnd, timers, timerStates);
                 CreateTrayIcon(hwnd);
                 //UpdateWindowList(hwnd);
-                UpdateDynamicMenus(hwnd);
 
                 SCROLLINFO si = {};
                 si.cbSize = sizeof(si);
                 si.fMask = SIF_RANGE | SIF_PAGE;
                 si.nMin = 0;
-                si.nMax = processNames.size() * 30;
+                si.nMax =(processNames.size() + 2)  * 30;
                 si.nPage = 100;
                 SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
                 scrollPos = 0;
@@ -4465,7 +4532,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
 
         default: { // Default message
-            //////////////std::cout << "default" << std::endl;
+            //std::cout << "default" << std::endl;
             return DefWindowProc(hwnd, uMsg, wParam, lParam); // Call the default window procedure
         }
     }
@@ -4479,11 +4546,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Prioritätsklasse auf HIGH_PRIORITY_CLASS setzen
     if (SetPriorityClass(hProcess, HIGH_PRIORITY_CLASS)) {
-        ////////////std::cout << "Die Prioritätsstufe wurde erfolgreich erhöht." << std::endl;
+        //std::cout << "Die Prioritätsstufe wurde erfolgreich erhöht." << std::endl;
     } else {
         //std::cerr << "Fehler beim Setzen der Prioritätsstufe." << std::endl;
     }
-    //////////////std::cout << "WinMain" << std::endl;
+    //std::cout << "WinMain" << std::endl;
     // Main function for Windows applications
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
@@ -4520,13 +4587,13 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Register the hotkey (CTRL+SHIFT+M)
     if (!RegisterHotKey(hwnd, HOTKEY_ID, MOD_CONTROL | MOD_SHIFT, 'M')) {
-        //////////std::cout << "Failed to register hotkey" << std::endl;
+        //std::cout << "Failed to register hotkey" << std::endl;
         return 1;
     }
 
     // Register the hotkey (CTRL+X)
     /*if (!RegisterHotKey(hwnd, HOTKEY_EXIT, MOD_CONTROL, 'X')) {
-        //////////std::cout << "Failed to register hotkey" << std::endl;
+        //std::cout << "Failed to register hotkey" << std::endl;
         return 1;
     }*/
 
@@ -4539,7 +4606,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     MSG msg = {}; // Initialize a MSG structure
     while (GetMessage(&msg, NULL, 0, 0)) {
-        //////////std::cout << "Message received: " << msg.message << std::endl;
+        //std::cout << "Message received: " << msg.message << std::endl;
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
