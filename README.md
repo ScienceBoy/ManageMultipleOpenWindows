@@ -40,5 +40,20 @@ Contributions are welcome! If you have any ideas, suggestions, or bug reports, p
 ## License
 This project is licensed under the MIT License. See the LICENSE file for details.
 
+## Privacy Policy
+This privacy policy describes how your personal data is collected, used, and protected when you use the "ManyOpenWindows" program.
+1. Data Collection and Use
+"ManyOpenWindows" does not collect any personal data from its users. The program does not store any information that could identify you, such as names, email addresses, or IP addresses.
+2. Data Storage
+Since "ManyOpenWindows" does not collect personal data, no data is stored, retained or transferred.
+3. Data Sharing
+As no personal data is collected, there is no data sharing with third parties.
+4. Security
+We implement appropriate technical and organizational measures to ensure the security of the program and to prevent unauthorized access to any data.
+5. Changes to the Privacy Policy
+This privacy policy may be updated from time to time. We recommend that you review this page regularly to stay informed about any changes.
+6. Contact
+If you have any questions or concerns regarding this privacy policy, please contact us through the contact information provided on our GitHub page.
+
 ## Acknowledgements
 Special thanks to everyone who contributed to the development and testing of this program.
