@@ -1,5 +1,7 @@
-#define UNICODE
-#define _UNICODE
+//#define UNICODE
+//#define _UNICODE
+#define NOMINMAX
+
 #include <windows.h> // Include Windows API functions
 #include <psapi.h> // Include functions for process management
 #include <vector> // Include STL vector library
@@ -11,6 +13,9 @@
 #include <cmath> // Include mathematical functions
 #include <windowsx.h> // Include Windowsx header file, which defines macros like GET_X_LPARAM and GET_Y_LPARAM
 #include <cctype>
+#include <clocale>
+#include <cwctype>
+#include <iostream>
 #include <commctrl.h>
 #include <map>
 #include <shellapi.h>
@@ -24,12 +29,12 @@
 
 extern "C" UINT GetDpiForWindow(HWND hwnd);
 // Manuelle Deklaration der Typdefinition und der Funktion
-typedef HANDLE DPI_AWARENESS_CONTEXT;
+//typedef HANDLE DPI_AWARENESS_CONTEXT;
 #ifndef DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
 #define DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 ((DPI_AWARENESS_CONTEXT)-4)
 #endif
 
-extern "C" BOOL SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT value);
+//extern "C" BOOL SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT value);
 
 #define WM_TRAYICON (WM_USER + 1) // Define a custom message for the tray icon
 #define WM_UPDATE_LIST (WM_USER + 2) // Define a custom message to update the window list
@@ -75,6 +80,7 @@ extern "C" BOOL SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT value);
 #define ID_SELECT_NONE          3860 
 #define ID_SELECT_VISIBLE       3880 
 #define ID_REFRESH              3890
+#define ID_ABOUT                3900
 #define HOTKEY_ID               9000
 #define HOTKEY_EXIT             9001
 
@@ -149,7 +155,7 @@ int screenCount = 1;
 int textWidth = 900;
 static int defaultYPos = -1;
 static int defaultXPos = 0;
-bool blinkState = false; // Globale Variable fÃ¼r den Blinkzustand
+bool blinkState = false; // Globale Variable für den Blinkzustand
 int globalScreenIndexChosen = 1;
 int currentLine = -1;
 int globalTotalChecked = 0;
@@ -193,7 +199,7 @@ bool operator==(const RECT& lhs, const RECT& rhs) {
 }
 
 void CheckAndStopTimers(HWND hwnd, std::vector<TimerInfo>& timers, std::vector<BOOL>& timerStates) {
-    // Implementiere die Logik zum PrÃ¼fen und Stoppen der Timer
+    // Implementiere die Logik zum Prüfen und Stoppen der Timer
     for (size_t i = 0; i < timers.size(); ++i) {
         timerStates[i] = KillTimer(hwnd, timers[i].id);
     }
@@ -211,16 +217,16 @@ void RestartTimers(HWND hwnd, std::vector<TimerInfo>& timers, std::vector<BOOL>&
 
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     //std::cout << "EnumWindowsProc" << std::endl;
-    wchar_t title[256]; // Buffer fÃ¼r den Fenstertitel
+    wchar_t title[256]; // Buffer für den Fenstertitel
     DWORD processId; // Prozess-ID
     GetWindowThreadProcessId(hwnd, &processId); // Prozess-ID des Fensters abrufen
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId); // Prozess Ã¶ffnen
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId); // Prozess öffnen
     if (hProcess) {
-        wchar_t exePath[MAX_PATH]; // Buffer fÃ¼r den Pfad zur ausfÃ¼hrbaren Datei
-        if (GetModuleFileNameExW(hProcess, NULL, exePath, sizeof(exePath) / sizeof(wchar_t))) { // Pfad zur ausfÃ¼hrbaren Datei abrufen
-            wchar_t processName[MAX_PATH]; // Buffer fÃ¼r den Prozessnamen
+        wchar_t exePath[MAX_PATH]; // Buffer für den Pfad zur ausführbaren Datei
+        if (GetModuleFileNameExW(hProcess, NULL, exePath, sizeof(exePath) / sizeof(wchar_t))) { // Pfad zur ausführbaren Datei abrufen
+            wchar_t processName[MAX_PATH]; // Buffer für den Prozessnamen
             if (GetModuleBaseNameW(hProcess, NULL, processName, sizeof(processName) / sizeof(wchar_t))) { // Prozessnamen abrufen
-                // Liste der auszuschlieÃŸenden Prozesse, die von Windows erstellt werden und/oder fÃ¼r den Benutzer nicht nÃ¼tzlich zu sehen sind
+                // Liste der auszuschließenden Prozesse, die von Windows erstellt werden und/oder für den Benutzer nicht nützlich zu sehen sind
                 std::vector<std::wstring> excludedProcesses = {
                     L"TextInputHost.exe",
                     L"SearchUI.exe",
@@ -236,29 +242,29 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
                 };
                 std::wstring processNameStr(processName);
                 if (processNameStr.find(L"CodeSetup") == 0 && processNameStr.rfind(L"tmp") == processNameStr.length() - 3) {
-                    CloseHandle(hProcess); // Prozesshandle schlieÃŸen
-                    return TRUE; // Prozess ausschlieÃŸen und Enumeration fortsetzen
+                    CloseHandle(hProcess); // Prozesshandle schließen
+                    return TRUE; // Prozess ausschließen und Enumeration fortsetzen
                 }
-                if (IsWindowVisible(hwnd) && std::find(excludedProcesses.begin(), excludedProcesses.end(), processName) == excludedProcesses.end()) { // ÃœberprÃ¼fen, ob das Fenster sichtbar und nicht ausgeschlossen ist
+                if (IsWindowVisible(hwnd) && std::find(excludedProcesses.begin(), excludedProcesses.end(), processName) == excludedProcesses.end()) { // Überprüfen, ob das Fenster sichtbar und nicht ausgeschlossen ist
                     int length = GetWindowTextW(hwnd, title, sizeof(title) / sizeof(wchar_t)); // Fenstertitel abrufen
-                    if (length > 0 && wcscmp(title, L"Program Manager") != 0 && wcscmp(title, L"JamPostMessageWindow") != 0) { // "Program Manager" ausschlieÃŸen
+                    if (length > 0 && wcscmp(title, L"Program Manager") != 0 && wcscmp(title, L"JamPostMessageWindow") != 0) { // "Program Manager" ausschließen
                         if (processNameStr.length() > 4 && 
                             (processNameStr.substr(processNameStr.length() - 4) == L".exe" || 
                              processNameStr.substr(processNameStr.length() - 4) == L".EXE")) {
                             processNameStr = processNameStr.substr(0, processNameStr.length() - 4); // ".exe" oder ".EXE" entfernen
                         }
                         std::vector<WindowInfo>* windows = reinterpret_cast<std::vector<WindowInfo>*>(lParam); // lParam in einen Vektor von WindowInfo umwandeln
-                        windows->emplace_back(WindowInfo{ hwnd, title, processNameStr, exePath, false }); // Fenster zur Liste hinzufÃ¼gen
+                        windows->emplace_back(WindowInfo{ hwnd, title, processNameStr, exePath, false }); // Fenster zur Liste hinzufügen
                     }
                 }
             }
         }
-        CloseHandle(hProcess); // Prozesshandle schlieÃŸen
+        CloseHandle(hProcess); // Prozesshandle schließen
     }
     std::vector<WindowInfo>* windows = reinterpret_cast<std::vector<WindowInfo>*>(lParam);
     if (windows->size() > 1) {
         for (auto it = windows->begin(); it != windows->end(); ) {
-            if (it->processName == L"ManyOpenWindows") {
+            if (it->processName == L"ManyOpenWindows" || it->processName == L"Many Open Windows" || it->processName == L"Many Open Windows VS") {
                 it = windows->erase(it);
             } else {
                 ++it;
@@ -327,18 +333,18 @@ void RemoveTrayIcon(HWND hwnd) {
 // Function to display the tray menu
 void ShowTrayMenu(HWND hwnd){
     //std::cout << "ShowTrayMenu" << std::endl;
-    POINT pt; // Struktur fÃ¼r die Cursorposition
+    POINT pt; // Struktur für die Cursorposition
     GetCursorPos(&pt); // Cursorposition abrufen
     //SetForegroundWindow(hwnd); // Fenster in den Vordergrund bringen
 
-    // Benutzerdefiniertes MenÃ¼ anzeigen
+    // Benutzerdefiniertes Menü anzeigen
     CreateCustomMenu(hwnd, pt);
 
-    // Optional: Standard-Popup-MenÃ¼ hinzufÃ¼gen
-    /*HMENU hMenu = CreatePopupMenu(); // Popup-MenÃ¼ erstellen
-    AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit"); // MenÃ¼eintrag hinzufÃ¼gen
-    TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, NULL); // MenÃ¼ anzeigen
-    DestroyMenu(hMenu);*/ // MenÃ¼ zerstÃ¶ren
+    // Optional: Standard-Popup-Menü hinzufügen
+    /*HMENU hMenu = CreatePopupMenu(); // Popup-Menü erstellen
+    AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit"); // Menüeintrag hinzufügen
+    TrackPopupMenu(hMenu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, NULL); // Menü anzeigen
+    DestroyMenu(hMenu);*/ // Menü zerstören
 }
 
 // Function to process messages
@@ -413,7 +419,7 @@ void ClearTemporaryTiles() {
         hThread = NULL;
     }
 
-    // Fenster zerstÃ¶ren
+    // Fenster zerstören
     if (hwndOverlay != NULL) {
         globalTotalCheckedIgnore = false;
         DestroyWindow(hwndOverlay);
@@ -423,7 +429,7 @@ void ClearTemporaryTiles() {
 
 void DrawRectangleWithScaling(HDC hdc, HWND hwnd, RECT screenRect, int x, int y, int windowWidth, int windowHeight) {
     //std::cout << "DrawRectangleWithScaling" << std::endl;
-    // Ermitteln des DPI-Werts fÃ¼r das Fenster
+    // Ermitteln des DPI-Werts für das Fenster
     UINT dpi = GetDpiForWindow(hwnd);
     float scaleFactor = dpi / 96.0f; // 96 ist der Standard-DPI-Wert
 
@@ -494,7 +500,7 @@ LRESULT CALLBACK OverlayWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
 }
 
 int ShowMessageBoxAndHandleTimers(HWND hwnd, const std::wstring& message, const std::wstring& title, UINT type, std::vector<TimerInfo>& timers) {
-    // Timer prÃ¼fen und stoppen
+    // Timer prüfen und stoppen
     std::vector<BOOL> timerStates(timers.size());
     CheckAndStopTimers(hwnd, timers, timerStates);
 
@@ -504,7 +510,7 @@ int ShowMessageBoxAndHandleTimers(HWND hwnd, const std::wstring& message, const 
     // Timer neu starten
     RestartTimers(hwnd, timers, timerStates);
 
-    // Ergebnis zurÃ¼ckgeben
+    // Ergebnis zurückgeben
     return result;
 }
 
@@ -570,7 +576,7 @@ DWORD WINAPI ShowTemporaryTilesThread(LPVOID lpParam) {
 
     RegisterClass(&wc);
 
-    // Holen Sie sich die Bildschirmkoordinaten fÃ¼r den angegebenen Bildschirm
+    // Holen Sie sich die Bildschirmkoordinaten für den angegebenen Bildschirm
     RECT screenRect = GetScreenRect(params->second);
     int screenWidth = screenRect.right - screenRect.left;
     int screenHeight = screenRect.bottom - screenRect.top;
@@ -686,9 +692,9 @@ bool IsValidInput(const wchar_t* input) {
             *input != L'[' && *input != L']' && *input != L'*' && *input != L'-' && *input != L'+' && *input != L'*' && *input != L'=' && *input != L'!' &&
             *input != L'{' && *input != L'}' && *input != L'&' && *input != L'%' && *input != L'#' && *input != L' ' &&
             *input != L'@' && *input != L'(' && *input != L')' && *input != L'^' && *input != L'~' &&
-            *input != L'Ã©' && *input != L'Ã¨' && *input != L'Ã ' && *input != L'$' && *input != L'Â£' &&
+            *input != L'é' && *input != L'è' && *input != L'à' && *input != L'$' && *input != L'£' &&
             *input != L'.' && *input != L'<' && *input != L'>' && *input != L',' &&
-            *input != L'Ã¤' && *input != L'Ã¶' && *input != L'Ã¼' && *input != L'ÃŸ') { // Umlaute
+            *input != L'ä' && *input != L'ö' && *input != L'ü' && *input != L'ß') { // Umlaute
             return false;
         }
         input++;
@@ -912,7 +918,7 @@ std::wstring trim(const std::wstring& str) {
     return str.substr(first, last - first + 1);
 }
 
-// Funktion zum Umwandeln von GroÃŸbuchstaben in nur den ersten GroÃŸbuchstaben
+// Funktion zum Umwandeln von Großbuchstaben in nur den ersten Großbuchstaben
 std::wstring capitalizeIfAllCaps(const std::wstring& str) {
     //std::cout << "capitalizeIfAllCaps" << std::endl;
     bool allCaps = true;
@@ -969,7 +975,7 @@ void ShowTooltip(HWND hwnd, const wchar_t* message) {
 
 
 void GetScreenCaptures(bool forceRecreate = false) {
-    // PrÃ¼fen, ob hBitmapCache gefÃ¼llt ist
+    // Prüfen, ob hBitmapCache gefüllt ist
     if (!forceRecreate && !hBitmapCache.empty()) {
         return;
     }
@@ -994,7 +1000,7 @@ void GetScreenCaptures(bool forceRecreate = false) {
     int newWidth, newHeight;
     int firstIconHeight = 0; // Variable to store the height of the first icon
 
-    // Berechne das SeitenverhÃ¤ltnis fÃ¼r den breitesten Monitor
+    // Berechne das Seitenverhältnis für den breitesten Monitor
     if (width > height) {
         newWidth = 25;
         newHeight = static_cast<int>(35.0 * height / width);
@@ -1002,7 +1008,7 @@ void GetScreenCaptures(bool forceRecreate = false) {
         newHeight = 25;
         newWidth = static_cast<int>(35.0 * width / height);
     }
-    firstIconHeight = newHeight; // Speichere die HÃ¶he des ersten Icons
+    firstIconHeight = newHeight; // Speichere die Höhe des ersten Icons
     
     // Sortiere die Monitore nach ihrer linken Koordinate
     std::sort(monitors.begin(), monitors.end(), CompareMonitors);
@@ -1022,7 +1028,7 @@ void GetScreenCaptures(bool forceRecreate = false) {
             newHeight = static_cast<int>(newHeight * widthLargestMonitor / widthSecondLargestMonitor);
         }
 
-        // PrÃ¼fen, ob HBITMAP bereits vorhanden ist oder neu erzeugt werden soll
+        // Prüfen, ob HBITMAP bereits vorhanden ist oder neu erzeugt werden soll
         if (forceRecreate || hBitmapCache.find(screenCount) == hBitmapCache.end()) {
             hBitmapCache[screenCount] = CaptureAndResizeScreen(NULL, monitor.rect, newWidth, newHeight);
         }
@@ -1086,7 +1092,7 @@ bool HasWindowsChanged() {
 void MoveWindowToMainMonitor(HWND hwnd) {
     //std::cout << "MoveWindowToMainMonitor" << std::endl;
     //MessageBoxW(hwnd, L"aha1", L"Debug Info", MB_OK);
-    WINDOWPLACEMENT wp;     // ÃœberprÃ¼fe, ob das Fenster maximiert ist
+    WINDOWPLACEMENT wp;     // Überprüfe, ob das Fenster maximiert ist
     wp.length = sizeof(WINDOWPLACEMENT);
     GetWindowPlacement(hwnd, &wp);
 
@@ -1143,13 +1149,13 @@ void AdjustWindowToFitMenu(HWND hwnd) {
 
         SIZE textSize;
         GetTextExtentPoint32(hdc, itemText, lstrlen(itemText), &textSize);
-        totalWidth += static_cast<int>(textSize.cx * scaleFactor) + 25; // FÃ¼ge 25 Pixel Puffer hinzu
+        totalWidth += static_cast<int>(textSize.cx * scaleFactor) + 25; // Füge 25 Pixel Puffer hinzu
     }
 
     ReleaseDC(hwnd, hdc);
 
     // Lege eine minimale Breite fest
-    const int minWidth = 700; // Beispielwert, anpassen nach Bedarf
+    const int minWidth = 900; // Beispielwert, anpassen nach Bedarf
     int newWidth = std::max(totalWidth, minWidth);
 
     RECT windowRect;
@@ -1205,7 +1211,7 @@ HWND CreateTooltip(HWND hwndParent) {
 // Function to update the window list
 void UpdateWindowList(HWND hwnd) {
     //std::cout << "UpdateWindowList" << std::endl;
-    // Fensterinhalt lÃ¶schen
+    // Fensterinhalt löschen
     RECT rect;
     GetClientRect(hwnd, &rect);
     HDC hdc = GetDC(hwnd);
@@ -1213,7 +1219,7 @@ void UpdateWindowList(HWND hwnd) {
     FillRect(hdc, &rect, hBrush);
     ReleaseDC(hwnd, hdc);
 
-    // Alte Steuerelemente zerstÃ¶ren
+    // Alte Steuerelemente zerstören
     /*for (auto& button : expandButtons) {
         DestroyWindow(button.second);
     }*/
@@ -1240,7 +1246,7 @@ void UpdateWindowList(HWND hwnd) {
         arrangeButton = NULL;
     }*/
 
-    // Fenster- und Zustandskarten lÃ¶schen
+    // Fenster- und Zustandskarten löschen
     processWindowsMap.clear();
     processNames.clear();
     checkboxState.clear();
@@ -1259,7 +1265,7 @@ void UpdateWindowList(HWND hwnd) {
         checkboxState[window.processName] = false;
     }
 
-    // Prozessnamen in eine Liste einfÃ¼gen
+    // Prozessnamen in eine Liste einfügen
     for (const auto& entry : processWindowsMap) {
         processNames.push_back(entry.first);
     }
@@ -1276,7 +1282,7 @@ void UpdateWindowList(HWND hwnd) {
     si.nPage = 100;
     SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
 
-    // SchaltflÃ¤chen fÃ¼r die Prozesse erstellen
+    // Schaltflächen für die Prozesse erstellen
     int yPos = 60;
     /*for (size_t i = 0; i < processNames.size(); ++i) {
         HWND expandButton = CreateWindowExW(
@@ -1294,7 +1300,7 @@ void UpdateWindowList(HWND hwnd) {
         yPos += 30;
     }*/
 
-    /*// WeiÃŸe Leiste am unteren Rand des Fensters erstellen
+    /*// Weiße Leiste am unteren Rand des Fensters erstellen
     GetClientRect(hwnd, &rect);
     int scrollbarWidth = GetSystemMetrics(SM_CXVSCROLL);
     int width = rect.right - rect.left - scrollbarWidth;
@@ -1310,7 +1316,7 @@ void UpdateWindowList(HWND hwnd) {
         NULL
     );
 
-    // SchaltflÃ¤chen fÃ¼r Minimieren, Wiederherstellen, SchlieÃŸen und Anordnen erstellen
+    // Schaltflächen für Minimieren, Wiederherstellen, Schließen und Anordnen erstellen
     int buttonCount = 4;
     int buttonWidth = (width - 20) / buttonCount;
 
@@ -1358,11 +1364,11 @@ void UpdateWindowList(HWND hwnd) {
         NULL
     );*/
 
-    // Aktuelle Fenster speichern und FenstergrÃ¶ÃŸe anpassen
+    // Aktuelle Fenster speichern und Fenstergröße anpassen
     SaveCurrentWindows();
     AdjustWindowSize(hwnd);
 
-    // Icons fÃ¼r die Prozesse laden und in der Map speichern
+    // Icons für die Prozesse laden und in der Map speichern
     HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
     for (const auto& processName : processNames) {
         auto it = windows.end();
@@ -1406,11 +1412,11 @@ void AdjustWindowSize(HWND hwnd) {
     // Calculate the new y-position
     //int newYPos = yPos - (newHeight - height);
 
-    if (yPos + newHeight > screenHeight - getTaskbarHeight(hwnd)) { // ÃœberprÃ¼fen Sie, ob das Fenster am unteren Rand des Bildschirms abgeschnitten wird
+    if (yPos + newHeight > screenHeight - getTaskbarHeight(hwnd)) { // Überprüfen Sie, ob das Fenster am unteren Rand des Bildschirms abgeschnitten wird
         /*newYPos = screenHeight - getTaskbarHeight(hwnd) - newHeight; // Verschieben Sie das Fenster nach oben, um es auf den Bildschirm zu passen
         if (newYPos < 0) {
-            newYPos = 0; // Stellen Sie sicher, dass das Fenster nicht Ã¼ber den oberen Rand des Bildschirms hinaus verschoben wird
-            newHeight = screenHeight - titleBarHeight - 25 - getTaskbarHeight(hwnd); // Passen Sie die HÃ¶he an, um auf den Bildschirm zu passen
+            newYPos = 0; // Stellen Sie sicher, dass das Fenster nicht über den oberen Rand des Bildschirms hinaus verschoben wird
+            newHeight = screenHeight - titleBarHeight - 25 - getTaskbarHeight(hwnd); // Passen Sie die Höhe an, um auf den Bildschirm zu passen
         }
         // Speichern Sie die neue Y-Koordinate als Standard
         defaultYPos = newYPos;*/
@@ -1420,7 +1426,7 @@ void AdjustWindowSize(HWND hwnd) {
     if (previousHeight != newHeight) 
     {
         newHeight = std::max(newHeight, 100);
-        SetWindowPos(hwnd, NULL, xPos, yPos, contentWidth, newHeight, SWP_NOZORDER); // Setzen Sie die neue Fensterposition und -grÃ¶ÃŸe
+        SetWindowPos(hwnd, NULL, xPos, yPos, contentWidth, newHeight, SWP_NOZORDER); // Setzen Sie die neue Fensterposition und -größe
         previousHeight = newHeight;
     }   
 
@@ -1428,20 +1434,20 @@ void AdjustWindowSize(HWND hwnd) {
     /*if (defaultYPos != -1) {
         newYPos = defaultYPos;
     } else {*/
-        //newYPos = yPos; // Verwenden Sie die ursprÃ¼ngliche Y-Koordinate, wenn keine Standard-Y-Koordinate gesetzt ist
+        //newYPos = yPos; // Verwenden Sie die ursprüngliche Y-Koordinate, wenn keine Standard-Y-Koordinate gesetzt ist
     //}
 
-    //SetWindowPos(hwnd, NULL, xPos, newYPos, contentWidth, newHeight, SWP_NOZORDER); // Setzen Sie die neue Fensterposition und -grÃ¶ÃŸe
+    //SetWindowPos(hwnd, NULL, xPos, newYPos, contentWidth, newHeight, SWP_NOZORDER); // Setzen Sie die neue Fensterposition und -größe
 }
 
-// Wrapper-Funktion fÃ¼r CreateArrangeOnScreenMenu
+// Wrapper-Funktion für CreateArrangeOnScreenMenu
 DWORD WINAPI ThreadFuncCreateSelectMenu(LPVOID lpParam) {
     HMENU hMenu = (HMENU)lpParam;
     CreateSelectScreenMenu(hMenu, false);
     return 0;
 }
 
-// Wrapper-Funktion fÃ¼r CreateMoveToScreenMenu
+// Wrapper-Funktion für CreateMoveToScreenMenu
 DWORD WINAPI ThreadFuncCreateMoveMenu(LPVOID lpParam) {
     HMENU hMenu = (HMENU)lpParam;
     CreateMoveToScreenMenu(hMenu);
@@ -1458,9 +1464,9 @@ void ExecuteCreateArrangeAndMoveMenuInThreads(HMENU hMenu, HMENU hMenuSelect) {
     // Erstelle den ersten Thread
     HANDLE hThread1 = CreateThread(
         NULL,       // Standard-Sicherheitsattribute
-        0,          // Standard-StackgrÃ¶ÃŸe
+        0,          // Standard-Stackgröße
         ThreadFuncCreateArrangeMenu, // Thread-Funktion
-        hMenu,      // Parameter fÃ¼r die Thread-Funktion
+        hMenu,      // Parameter für die Thread-Funktion
         0,          // Standard-Erstellungsflags
         NULL        // Thread-ID (optional)
     );
@@ -1468,15 +1474,15 @@ void ExecuteCreateArrangeAndMoveMenuInThreads(HMENU hMenu, HMENU hMenuSelect) {
     // Warte, bis der erste Thread beendet ist
     WaitForSingleObject(hThread1, INFINITE);
 
-    // SchlieÃŸe das Handle des ersten Threads
+    // Schließe das Handle des ersten Threads
     CloseHandle(hThread1);
 
     // Erstelle den zweiten Thread
     HANDLE hThread2 = CreateThread(
         NULL,       // Standard-Sicherheitsattribute
-        0,          // Standard-StackgrÃ¶ÃŸe
+        0,          // Standard-Stackgröße
         ThreadFuncCreateMoveMenu, // Thread-Funktion
-        hMenu,      // Parameter fÃ¼r die Thread-Funktion
+        hMenu,      // Parameter für die Thread-Funktion
         0,          // Standard-Erstellungsflags
         NULL        // Thread-ID (optional)
     );
@@ -1484,15 +1490,15 @@ void ExecuteCreateArrangeAndMoveMenuInThreads(HMENU hMenu, HMENU hMenuSelect) {
     // Warte, bis der zweite Thread beendet ist
     WaitForSingleObject(hThread2, INFINITE);
 
-    // SchlieÃŸe das Handle des zweiten Threads
+    // Schließe das Handle des zweiten Threads
     CloseHandle(hThread2);
 
     // Erstelle den dritten Thread
     HANDLE hThread3 = CreateThread(
         NULL,       // Standard-Sicherheitsattribute
-        0,          // Standard-StackgrÃ¶ÃŸe
+        0,          // Standard-Stackgröße
         ThreadFuncCreateSelectMenu, // Thread-Funktion
-        hMenuSelect,      // Parameter fÃ¼r die Thread-Funktion
+        hMenuSelect,      // Parameter für die Thread-Funktion
         0,          // Standard-Erstellungsflags
         NULL        // Thread-ID (optional)
     );
@@ -1500,7 +1506,7 @@ void ExecuteCreateArrangeAndMoveMenuInThreads(HMENU hMenu, HMENU hMenuSelect) {
     // Warte, bis der dritte Thread beendet ist
     WaitForSingleObject(hThread3, INFINITE);
 
-    // SchlieÃŸe das Handle des dritten Threads
+    // Schließe das Handle des dritten Threads
     CloseHandle(hThread3);
 }
 
@@ -1537,8 +1543,8 @@ HMENU CreateSelectScreenMenu(HMENU hMenu, bool forceRecreate = false) {
             HBITMAP hBitmap = hBitmapCache[screenCount];
             AddMenuItemWithImage(hSelectScreenMenu, ID_SELECT_SCREEN_BASE + monitor.index, hBitmap, menuText);
         }
+        AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hSelectScreenMenu, L"Select Windows on Screen");
     }
-    AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hSelectScreenMenu, L"Select Windows on Screen");
     return hSelectScreenMenu;
 }
 
@@ -1577,13 +1583,15 @@ void InitializeMenu(HWND hwnd) {
     AppendMenu(hMenu, MF_STRING, ID_SAVEANDCLOSE, L"Sa&ve And Close Window(s)");
     //AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hCloseMenu, L"&Close / Save Window(s)");
 
+    AppendMenu(hMenu, MF_STRING, ID_ABOUT, L"A&bout");
+
     SetMenu(hwnd, hMenu);
 }
 
 void UpdateDynamicMenus(HWND hwnd) {
     //std::cout << "UpdateDynamicMenus" << std::endl;
-    // Entferne die alten dynamischen EintrÃ¤ge
-    // Hier musst du die Positionen der dynamischen EintrÃ¤ge kennen
+    // Entferne die alten dynamischen Einträge
+    // Hier musst du die Positionen der dynamischen Einträge kennen
     // Angenommen, sie sind an den Positionen 3 und 4
     /*RemoveMenu(hMenu, 3, MF_BYPOSITION);
     RemoveMenu(hMenu, 3, MF_BYPOSITION); // Da die Positionen sich verschieben
@@ -1630,11 +1638,11 @@ bool ConfirmClose(HWND parentHwnd) {
     // Bringe das Parent-Fenster in den Vordergrund
     SetForegroundWindow(parentHwnd);
 
-    // Zeige das BestÃ¤tigungsdialogfeld an
+    // Zeige das Bestätigungsdialogfeld an
     int result = ShowMessageBoxAndHandleTimers(parentHwnd, L"Do you really want to close the selected windows?", L"Confirmation", MB_YESNO | MB_ICONQUESTION | MB_TOPMOST, timers);
     //int result = MessageBoxW(parentHwnd, L"Do you really want to close the selected windows?", L"Confirmation", MB_YESNO | MB_ICONQUESTION | MB_TOPMOST);
 
-    // Gib zurÃ¼ck, ob der Benutzer "Ja" gewÃ¤hlt hat
+    // Gib zurück, ob der Benutzer "Ja" gewählt hat
     return (result == IDYES);
 }
 
@@ -1652,7 +1660,7 @@ void SearchAndCheck(const std::wstring& searchString, HWND hwnd) {
         }
     }
 
-    // FÃ¼hre die Suche durch und setze passende EintrÃ¤ge auf "checked"
+    // Führe die Suche durch und setze passende Einträge auf "checked"
     bool foundAnything = false;
     if (lowerSearchString.length() >= 1) {
         for (auto& processName : processNames) {
@@ -1667,9 +1675,9 @@ void SearchAndCheck(const std::wstring& searchString, HWND hwnd) {
                 bool windowMatch = lowerWindowTitle.find(lowerSearchString) != std::wstring::npos;
                 if (windowMatch) {
                     //window.checked = true;
-                    window.visible = true; // Setze das sichtbare Attribut auf true, wenn es Ã¼bereinstimmt
+                    window.visible = true; // Setze das sichtbare Attribut auf true, wenn es übereinstimmt
                     //std::cout << window.visible << std::endl;
-                    expandedState[processName] = true; // Klappe den Prozess auf, wenn ein Fenster Ã¼bereinstimmt
+                    expandedState[processName] = true; // Klappe den Prozess auf, wenn ein Fenster übereinstimmt
                     //ShowWindow(hGoToButton, SW_HIDE); // Hat funktioniert, aber braucht es nicht
                     foundAnything = true;
                 }
@@ -1841,7 +1849,7 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
     std::thread([hwnd, width, height]() {
         auto start = std::chrono::high_resolution_clock::now();
 
-        // Abgerundete Ecken hinzufÃ¼gen
+        // Abgerundete Ecken hinzufügen
         HRGN hRgn = CreateRoundRectRgn(0, 0, width, height, 20, 20); // 20 ist der Radius der abgerundeten Ecken
         SetWindowRgn(hwnd, hRgn, TRUE);
 
@@ -1849,14 +1857,14 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
         //std::cout << "CreateRoundRectRgn and SetWindowRgn: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
         start = std::chrono::high_resolution_clock::now();
 
-        // Schwarzen Rahmen hinzufÃ¼gen
+        // Schwarzen Rahmen hinzufügen
         SetLayeredWindowAttributes(hwnd, RGB(0, 0, 0), 255, LWA_COLORKEY);
 
         end = std::chrono::high_resolution_clock::now();
         //std::cout << "SetLayeredWindowAttributes: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
         start = std::chrono::high_resolution_clock::now();
 
-        // Schatten hinzufÃ¼gen
+        // Schatten hinzufügen
         MARGINS margins = {3, 3, 3, 3}; // Schattenbreite auf 10 Pixel einstellen
         DwmExtendFrameIntoClientArea(hwnd, &margins);
 
@@ -1864,7 +1872,7 @@ void CreateCustomMenu(HWND parentHwnd, POINT pt) {
         //std::cout << "DwmExtendFrameIntoClientArea: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us\n";
         start = std::chrono::high_resolution_clock::now();
 
-        // Blur-Effekt hinzufÃ¼gen
+        // Blur-Effekt hinzufügen
         DWM_BLURBEHIND bb = {};
         bb.dwFlags = DWM_BB_ENABLE | DWM_BB_BLURREGION;
         bb.fEnable = TRUE;
@@ -2039,14 +2047,14 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
             //images.push_back(hExitButton);
 
-            // Abgerundete Ecken hinzufÃ¼gen
+            // Abgerundete Ecken hinzufügen
             HRGN hRgn = CreateRoundRectRgn(0, 0, width, height, 20, 20); // 20 ist der Radius der abgerundeten Ecken
             SetWindowRgn(hExitButton, hRgn, TRUE);
 
             // Hintergrundfarbe und Textfarbe anpassen
             HDC hdc = GetDC(hExitButton);
             SetBkColor(hdc, RGB(0, 0, 0)); // Schwarzer Hintergrund
-            SetTextColor(hdc, RGB(255, 255, 255)); // WeiÃŸer Text
+            SetTextColor(hdc, RGB(255, 255, 255)); // Weißer Text
             ReleaseDC(hExitButton, hdc);
           
             break;
@@ -2075,7 +2083,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             SetCursor(LoadCursor(NULL, IDC_ARROW));
             HWND hWndCursor = (HWND)wParam;
             if (std::find(images.begin(), images.end(), hWndCursor) != images.end()) {
-                // Der Mauszeiger befindet sich Ã¼ber einem der STATIC-Elemente
+                // Der Mauszeiger befindet sich über einem der STATIC-Elemente
                 POINT pt;
                 GetCursorPos(&pt);
                 ScreenToClient(hwnd, &pt);
@@ -2086,7 +2094,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
                 if (PtInRect(&rect, pt)) {
                     if (hWndCursor != lastHoveredImage) {
-                        // Setze das vorherige Icon zurÃ¼ck
+                        // Setze das vorherige Icon zurück
                         if (lastHoveredImage != NULL) {
                             SendMessage(lastHoveredImage, STM_SETIMAGE, IMAGE_ICON, (LPARAM)lastOriginalIcon);
                         }
@@ -2102,7 +2110,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 }
                 return TRUE; // Verhindert die Standard-Cursor-Verarbeitung
             } else {
-                // Setze das Icon zurÃ¼ck, wenn der Mauszeiger das STATIC-Element verlÃ¤sst
+                // Setze das Icon zurück, wenn der Mauszeiger das STATIC-Element verlässt
                 if (lastHoveredImage != NULL) {
                     SendMessage(lastHoveredImage, STM_SETIMAGE, IMAGE_ICON, (LPARAM)lastOriginalIcon);
                     lastHoveredImage = NULL;
@@ -2125,7 +2133,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             HBITMAP hbmMem = CreateCompatibleBitmap(hdc, rect.right, rect.bottom);
             HBITMAP hbmOld = (HBITMAP)SelectObject(memDC, hbmMem);
 
-            // Hintergrund fÃ¼llen
+            // Hintergrund füllen
             HBRUSH hBrush = CreateSolidBrush(GetSysColor(COLOR_MENU));
             FillRect(memDC, &rect, hBrush);
             DeleteObject(hBrush);
@@ -2283,7 +2291,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                                 y += windowHeight; // Increment the Y position
                             }*/
                             Sleep(100);
-                            // GrÃ¶ÃŸe des klienten Bereichs ermitteln
+                            // Größe des klienten Bereichs ermitteln
                             RECT clientRect;
                             GetClientRect(window.hwnd, &clientRect);
                             int clientWidth = clientRect.right - clientRect.left;
@@ -2293,11 +2301,11 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                             DWORD style = GetWindowLong(window.hwnd, GWL_STYLE);
                             DWORD exStyle = GetWindowLong(window.hwnd, GWL_EXSTYLE);
 
-                            // Anpassung der FenstergrÃ¶ÃŸe basierend auf dem klienten Bereich
+                            // Anpassung der Fenstergröße basierend auf dem klienten Bereich
                             RECT adjustedRect = {0, 0, clientWidth, clientHeight};
                             AdjustWindowRectEx(&adjustedRect, style, FALSE, exStyle);
 
-                            // Berechnete FenstergrÃ¶ÃŸe
+                            // Berechnete Fenstergröße
                             int adjustedWidth = adjustedRect.right - adjustedRect.left;
                             int adjustedHeight = adjustedRect.bottom - adjustedRect.top;
 
@@ -2427,9 +2435,9 @@ void UpdateControlPositions(HWND hwnd) {
     GetClientRect(hwnd, &clientRect);
 
     int searchBoxWidth = 200; // Breite des Suchfelds
-    int searchBoxHeight = 20; // HÃ¶he des Suchfelds
+    int searchBoxHeight = 20; // Höhe des Suchfelds
     int buttonWidth = 20; // Breite der Buttons
-    int buttonHeight = searchBoxHeight; // HÃ¶he der Buttons
+    int buttonHeight = searchBoxHeight; // Höhe der Buttons
     int padding = 5; // Abstand zwischen den Steuerelementen
 
     int searchBoxX = clientRect.right - searchBoxWidth - 1 * buttonWidth - 2 * padding;
@@ -2463,7 +2471,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             RECT clientRect;
             GetClientRect(hwnd, &clientRect);
             int searchBoxWidth = 200; // Breite des Suchfelds
-            int searchBoxHeight = 20; // HÃ¶he des Suchfelds
+            int searchBoxHeight = 20; // Höhe des Suchfelds
             int searchBoxX = clientRect.right - searchBoxWidth - getTaskbarHeight(hwnd); // Position X des Suchfelds
             int searchBoxY = 5; // Position Y des Suchfelds
 
@@ -2479,7 +2487,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                                         searchBoxX + searchBoxWidth, searchBoxY, 20, searchBoxHeight, hwnd, (HMENU)IDC_ERASEBUTTON, 
                                         ((LPCREATESTRUCT)lParam)->hInstance, NULL);
 
-           // Erstellen Sie den "Go to"-Button fÃ¼r Suchstrings, die nicht gefunden werden
+           // Erstellen Sie den "Go to"-Button für Suchstrings, die nicht gefunden werden
             hGoToButton = CreateWindowEx(0, TEXT("BUTTON"), L"\u21AA", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 
                                         searchBoxX + searchBoxWidth + 20, searchBoxY, 20, searchBoxHeight, hwnd, (HMENU)IDC_GOTOBUTTON, 
                                         ((LPCREATESTRUCT)lParam)->hInstance, NULL);
@@ -2522,7 +2530,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             hIcon1 = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MYICON));
 
             auto windows = getOpenWindows();
-            // Lade Icons fÃ¼r jeden Prozess und speichere sie in der Map
+            // Lade Icons für jeden Prozess und speichere sie in der Map
             for (const auto& processName : processNames) {
                 auto it = windows.end();
                 for (auto winIt = windows.begin(); winIt != windows.end(); ++winIt) {
@@ -3169,7 +3177,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_ERASEBKGND:
             //std::cout << "WM_ERASEBKGND" << std::endl;
-            return 1; // Hintergrund nicht lÃ¶schen
+            return 1; // Hintergrund nicht löschen
 
         case WM_COMMAND: { // Message when a command is executed (e.g., button click)
             //std::cout << "WM_COMMAND" << std::endl;
@@ -3265,7 +3273,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         if (window.checked) { // Check if the window is selected
                             SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
                             //ProcessMessages(); // Process messages
-                            window.arranged = false; // Setze arranged auf false, nachdem das Fenster vergrÃ¶ÃŸert wurde
+                            window.arranged = false; // Setze arranged auf false, nachdem das Fenster vergrößert wurde
                             ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
                             ProcessMessages(); // Process messages
                         }
@@ -3297,7 +3305,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         if (window.checked) { // Check if the window is selected
                             SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
                             //ProcessMessages(); // Process messages
-                            window.arranged = false; // Setze arranged auf false, nachdem das Fenster vergrÃ¶ÃŸert wurde
+                            window.arranged = false; // Setze arranged auf false, nachdem das Fenster vergrößert wurde
                             ShowWindow(window.hwnd, SW_MAXIMIZE); // Maximize the window
                             ProcessMessages(); // Process messages
                         }
@@ -3414,11 +3422,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                                 // Tastenkombination Ctrl+S senden
                                 INPUT inputs[4] = {};
 
-                                // Ctrl-Taste drÃ¼cken
+                                // Ctrl-Taste drücken
                                 inputs[0].type = INPUT_KEYBOARD;
                                 inputs[0].ki.wVk = VK_CONTROL;
 
-                                // S-Taste drÃ¼cken
+                                // S-Taste drücken
                                 inputs[1].type = INPUT_KEYBOARD;
                                 inputs[1].ki.wVk = 'S';
 
@@ -3561,7 +3569,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                                 y += windowHeight; // Increment the Y position
                             }
                             Sleep(100);
-                            // GrÃ¶ÃŸe des klienten Bereichs ermitteln
+                            // Größe des klienten Bereichs ermitteln
                             RECT clientRect;
                             GetClientRect(window.hwnd, &clientRect);
                             int clientWidth = clientRect.right - clientRect.left;
@@ -3571,11 +3579,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                             DWORD style = GetWindowLong(window.hwnd, GWL_STYLE);
                             DWORD exStyle = GetWindowLong(window.hwnd, GWL_EXSTYLE);
 
-                            // Anpassung der FenstergrÃ¶ÃŸe basierend auf dem klienten Bereich
+                            // Anpassung der Fenstergröße basierend auf dem klienten Bereich
                             RECT adjustedRect = {0, 0, clientWidth, clientHeight};
                             AdjustWindowRectEx(&adjustedRect, style, FALSE, exStyle);
 
-                            // Berechnete FenstergrÃ¶ÃŸe
+                            // Berechnete Fenstergröße
                             int adjustedWidth = adjustedRect.right - adjustedRect.left;
                             int adjustedHeight = adjustedRect.bottom - adjustedRect.top;
                             //std::cout << windowWidth << " " << adjustedWidth << std::endl;
@@ -3843,6 +3851,26 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     InvalidateRect(hwnd, NULL, TRUE);
                 }
             }
+            if (LOWORD(wParam) == ID_ABOUT) {
+                MessageBox(hwnd,
+                    L"MoW - Many Open Windows\n\n"
+                    L"Thanks for using this tool,\nand we hope it helps you a lot\n"
+                    L"to be more productive.\n\n"
+                    L"Shortcuts:\n"
+                    L"CTRL+SHIFT+M:\tShow program window, reload, refresh list\n"
+                    L"CTRL+I:\t\tMinimize Window(s)\n"
+                    L"CTRL+X:\t\tMaximize Window(s)\n"
+                    L"CTRL+R:\t\tRestore Window(s)\n"
+                    L"CTRL+N:\t\tArrange Window(s)\n"
+                    L"CTRL+M:\t\tMove Window(s)\n"
+                    L"CTRL+S:\t\tSelect All Windows\n"
+                    L"CTRL+U:\t\tUn-select All Windows\n"
+                    L"CTRL+W:\t\tClose Program to Tray\n"
+                    L"CTRL+Q:\t\tExit Program\n\n\n"
+                    L"v1.1.110225",
+                    L"About",
+                    MB_OK);
+            }
             
         }
         break;
@@ -3934,7 +3962,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         case WM_MENUSELECT: {
             //std::cout << "WM_MENUSELECT" << std::endl;
             //std::cout << "Beginne WM_MENUSELECT" << std::endl;
-            // LÃ¶schen Sie die temporÃ¤ren Kacheln bei jeder MenÃ¼auswahl
+            // Löschen Sie die temporären Kacheln bei jeder Menüauswahl
             try {
                 //std::cout << "Vor ClearTemporaryTiles" << std::endl;
                 ClearTemporaryTiles();
@@ -4016,7 +4044,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 POINT pt; 
                 GetCursorPos(&pt); 
 
-                // ÃœberprÃ¼fen, ob die Maus mindestens 10 Pixel verschoben wurde
+                // Überprüfen, ob die Maus mindestens 10 Pixel verschoben wurde
                 if (prevPt.x == -1 || prevPt.y == -1 || abs(pt.x - prevPt.x) >= 10 || abs(pt.y - prevPt.y) >= 10) {
                     // Mausposition aktualisieren
                     prevPt = pt;
@@ -4083,14 +4111,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             //std::cout << "WM_MOUSEWHEEL" << std::endl;
             int delta = GET_WHEEL_DELTA_WPARAM(wParam); // Abrufen der Scroll-Richtung und -Menge
             SCROLLINFO si = {}; // Initialisieren einer SCROLLINFO-Struktur
-            si.cbSize = sizeof(si); // Setzen der GrÃ¶ÃŸe der Struktur
+            si.cbSize = sizeof(si); // Setzen der Größe der Struktur
             si.fMask = SIF_ALL; // Festlegen, dass alle Informationen gesetzt werden
             GetScrollInfo(hwnd, SB_VERT, &si); // Abrufen der aktuellen Scroll-Informationen
             int yPos = si.nPos - delta / WHEEL_DELTA * 30; // Neue Y-Position berechnen
 
             // Begrenzen der Y-Position
             yPos = std::max(0, std::min(yPos, si.nMax - (int)si.nPage + 1));
-            if (yPos != si.nPos) { // ÃœberprÃ¼fen, ob sich die Position geÃ¤ndert hat
+            if (yPos != si.nPos) { // Überprüfen, ob sich die Position geändert hat
                 si.fMask = SIF_POS; // Festlegen, dass die Position gesetzt wird
                 si.nPos = yPos; // Setzen der neuen Position
                 SetScrollInfo(hwnd, SB_VERT, &si, TRUE); // Scroll-Info setzen
@@ -4099,7 +4127,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 GetClientRect(hwnd, &scrollRect);
                 //scrollRect.bottom -= 55; // Bereich ohne grauen Balken
                 ScrollWindowEx(hwnd, 0, delta / WHEEL_DELTA * 30, &scrollRect, &scrollRect, NULL, NULL, SW_INVALIDATE | SW_ERASE); 
-                InvalidateRect(hwnd, &scrollRect, TRUE); // Rechteck ungÃ¼ltig machen und neu zeichnen
+                InvalidateRect(hwnd, &scrollRect, TRUE); // Rechteck ungültig machen und neu zeichnen
             }
         }
         break;
@@ -4117,14 +4145,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             HBITMAP hbmMem = CreateCompatibleBitmap(hdc, clientRect.right, clientRect.bottom);
             HBITMAP hbmOld = (HBITMAP)SelectObject(hdcMem, hbmMem);
 
-            // Hintergrund des Offscreen-Puffers fÃ¼llen
-            HBRUSH hBrush = CreateSolidBrush(RGB(255, 255, 255)); // WeiÃŸer Hintergrund
+            // Hintergrund des Offscreen-Puffers füllen
+            HBRUSH hBrush = CreateSolidBrush(RGB(255, 255, 255)); // Weißer Hintergrund
             FillRect(hdcMem, &clientRect, hBrush);
             DeleteObject(hBrush);
 
             // Zeichne das UI im Offscreen-Puffer
-            int searchBoxHeight = 0; // HÃ¶he des Suchfelds
-            int yPos = searchBoxHeight - scrollPos; // Platz fÃ¼r das Suchfeld und etwas Abstand
+            int searchBoxHeight = 0; // Höhe des Suchfelds
+            int yPos = searchBoxHeight - scrollPos; // Platz für das Suchfeld und etwas Abstand
             int nmbOfItemsOnWindow = 0;
             HFONT hFont = CreateFont(24, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, TEXT("Segoe UI Symbol"));
             HFONT hOldFont = (HFONT)SelectObject(hdcMem, hFont);
@@ -4172,15 +4200,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 std::wstring textBeforeProcessName = expandedState[processName] ? L"\u25BC " : L"\u25B6 "; // Set the button text
 
                 if (AlreadyOneChecked == windows.size()) {
-                    textBeforeProcessName += L" "; // Platzhalter fÃ¼r das Quadrat
+                    textBeforeProcessName += L" "; // Platzhalter für das Quadrat
                 } else if (AlreadyOneChecked > 0) {
                     if (expandedState[processName]) {
-                        textBeforeProcessName += L" "; // Platzhalter fÃ¼r das Zeichen \u25EA
+                        textBeforeProcessName += L" "; // Platzhalter für das Zeichen \u25EA
                     } else {
-                        textBeforeProcessName += L" "; // Platzhalter fÃ¼r das Zeichen \u25EA
+                        textBeforeProcessName += L" "; // Platzhalter für das Zeichen \u25EA
                     }
                 } else {
-                    if (i == highlightedRow && highlightedWindowRow == -1) textBeforeProcessName += checkboxState[processName] ? L" " : L"\u2610 "; // Platzhalter fÃ¼r das Quadrat
+                    if (i == highlightedRow && highlightedWindowRow == -1) textBeforeProcessName += checkboxState[processName] ? L" " : L"\u2610 "; // Platzhalter für das Quadrat
                 }
 
                 std::wstring textAfterProcessName = L" (" + std::to_wstring(AlreadyOneChecked) + L" / " + std::to_wstring(windows.size()) + L")";
@@ -4200,7 +4228,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     SelectObject(hdcMem, oldPen);
                     DeleteObject(bluePen);
                 } else {
-                    HBRUSH whiteBrush = CreateSolidBrush(RGB(255, 255, 255)); // WeiÃŸ
+                    HBRUSH whiteBrush = CreateSolidBrush(RGB(255, 255, 255)); // Weiß
                     FillRect(hdcMem, &rect, whiteBrush);
                     DeleteObject(whiteBrush);
                 }
@@ -4280,7 +4308,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
 
                 //SetWindowPos(expandButtons[processName], HWND_TOPMOST, 10, yPos, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
-                // ÃœberprÃ¼fe, ob die Position geÃ¤ndert wurde
+                // Überprüfe, ob die Position geändert wurde
                 /*if (buttonPositions[processName] != yPos) {
                     //SetWindowPos(expandButtons[processName], HWND_TOPMOST, 10, yPos, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOREDRAW);
                     buttonPositions[processName] = yPos; // Aktualisiere die gespeicherte Position
@@ -4317,7 +4345,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                                 SelectObject(hdcMem, oldPen);
                                 DeleteObject(bluePen);
                             } else {
-                                HBRUSH whiteBrush = CreateSolidBrush(RGB(255, 255, 255)); // WeiÃŸ
+                                HBRUSH whiteBrush = CreateSolidBrush(RGB(255, 255, 255)); // Weiß
                                 FillRect(hdcMem, &windowRect, whiteBrush);
                                 DeleteObject(whiteBrush);
                             }
@@ -4522,6 +4550,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 //SetForegroundWindow(hwnd); 
                 //InvalidateWindow(hwnd);
                 //ProcessMessages();
+            SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(IDC_ERASEBUTTON, 0), 0);
             SetForegroundWindow(hwnd);
             SetFocus(hwnd);
         } else if (lParam == WM_RBUTTONUP) { 
@@ -4544,11 +4573,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Handle zum aktuellen Prozess abrufen
     HANDLE hProcess = GetCurrentProcess();
 
-    // PrioritÃ¤tsklasse auf HIGH_PRIORITY_CLASS setzen
+    // Prioritätsklasse auf HIGH_PRIORITY_CLASS setzen
     if (SetPriorityClass(hProcess, HIGH_PRIORITY_CLASS)) {
-        //std::cout << "Die PrioritÃ¤tsstufe wurde erfolgreich erhÃ¶ht." << std::endl;
+        //std::cout << "Die Prioritätsstufe wurde erfolgreich erhöht." << std::endl;
     } else {
-        //std::cerr << "Fehler beim Setzen der PrioritÃ¤tsstufe." << std::endl;
+        //std::cerr << "Fehler beim Setzen der Prioritätsstufe." << std::endl;
     }
     //std::cout << "WinMain" << std::endl;
     // Main function for Windows applications
