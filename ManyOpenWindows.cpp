@@ -178,6 +178,7 @@ int widthLargestMonitor = 0;
 int widthSecondLargestMonitor = 0;
 int previousHeight = 0;
 POINT prevPt = { -1, -1 };
+bool actionOnGoing = false;
 
 std::vector<TimerInfo> timers = {
     {BLINKING_TIMER_ID, BLINKING_TIMER_ID_time},
@@ -2038,7 +2039,8 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 NULL
             );
 
-            HICON hIconExit = (HICON)LoadImage(GetModuleHandle(L"SHELL32.DLL"), MAKEINTRESOURCE(16805), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
+            //HICON hIconExit = (HICON)LoadImage(GetModuleHandle(L"SHELL32.DLL"), MAKEINTRESOURCE(16805), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
+            HICON hIconExit = (HICON)LoadImage(GetModuleHandle(L"SHELL32.DLL"), MAKEINTRESOURCE(221), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR);
             if (hIconExit == NULL) {
                 OutputDebugString(L"Failed to load icon\n");
             } else {
@@ -2248,6 +2250,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                         }
                     }
                 }
+                if (numWindows == 0) return 0;
         //std::cout << "numWindows: " << numWindows << std::endl;
                 int cols = static_cast<int>(ceil(sqrt(numWindows))); // Calculate the number of columns
                 int rows = (numWindows + cols - 1) / cols; // Calculate the number of rows
@@ -2325,7 +2328,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 //std::cout << "minAdjustedWidth: " << minAdjustedWidth << std::endl;
                 //std::cout << "cols: " << cols << std::endl;
                 // Anzahl der Fenster nebeneinander und die Anzahl der Fensterreihen berechnen
-                cols = screenWidth / std::max(maxAdjustedWidth, screenWidth/cols);
+                cols = screenWidth / std::max(std::max(maxAdjustedWidth, screenWidth/cols), 1);
                 //std::cout << "cols: " << cols << std::endl;                
                 rows = (numWindows + cols - 1) / cols;
                 windowWidth = screenWidth / cols; // Calculate the window width
@@ -2676,6 +2679,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         highlightedWindowRow = -1;
                         highlightedRow = 0;
                     }
+                    else
+                    {
+                        highlightedWindowRow = -1;
+                        highlightedRow = 0;
+                    }
                     if (highlightedWindowRow != -1)
                         if (highlightedRow < (processNames.size() - 3) + processWindowsMap.at(processNames.at(highlightedRow)).size())
                             setScrollToNewPos(hwnd, 0);
@@ -2791,7 +2799,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         //std::cout << "Case 11: highlightedWindowRow set to -1, highlightedRow set to " << highlightedRow << std::endl;
                         highlightedRow = processNames.size() - 1;
                     }
-
+                    else
+                    {
+                        highlightedWindowRow = -1;
+                        highlightedRow = 0;
+                    }
                     if (highlightedWindowRow != -1)
                         if (highlightedRow + extractLastFiveDigits(highlightedWindowRow) > 5 && highlightedRow < (processNames.size() - 1) + processWindowsMap.at(processNames.at(highlightedRow)).size())
                             setScrollToNewPos(hwnd, 1);
@@ -3262,6 +3274,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     int result = ShowMessageBoxAndHandleTimers(hwnd, L"Please select one or more window(s).", L"Warning", MB_OK | MB_ICONWARNING, timers);
                     break;
                 }
+
+                if (actionOnGoing) {
+                    int result = ShowMessageBoxAndHandleTimers(hwnd, L"Please wait for the former action to finish, then restart your new action.", L"Warning", MB_OK | MB_ICONWARNING, timers);
+                    break;
+                }
+
+                actionOnGoing = true;
+                
             }
 
             if (id == ID_MINIMIZE || LOWORD(wParam) == ID_CTRL_I) { // Check if the ID is 2000 (Minimize)
@@ -3271,7 +3291,8 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 for (auto& entry : processWindowsMap) { // Iterate through all processes
                     for (auto& window : entry.second) { // Iterate through all windows of a process
                         if (window.checked) { // Check if the window is selected
-                            SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
+                            //SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
+                            //SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
                             //ProcessMessages(); // Process messages
                             window.arranged = false; // Setze arranged auf false, nachdem das Fenster vergrößert wurde
                             ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
@@ -3296,6 +3317,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 ProcessMessages(); // Process messages
                 //InvalidateWindow(hwnd);
                 Sleep(100); // Short pause
+                actionOnGoing = false;
             } else if (id == ID_MAXIMIZE || LOWORD(wParam) == ID_CTRL_X) { // Check if the ID is 2000 (Minimize)
                 MinimizeToTray(hwnd); // Minimize the window to the tray
                 int screenWidth = GetSystemMetrics(SM_CXSCREEN);
@@ -3328,6 +3350,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 ProcessMessages(); // Process messages
                 //InvalidateWindow(hwnd);
                 Sleep(100); // Short pause
+                actionOnGoing = false;
             } else if (id == ID_RESTORE || LOWORD(wParam) == ID_CTRL_R) { // Check if the ID is 2001 (Restore)
                 MinimizeToTray(hwnd); // Minimize the window to the tray
                 for (const auto& entry : processWindowsMap) { // Iterate through all processes
@@ -3365,6 +3388,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 ProcessMessages(); // Process messages
                 //InvalidateWindow(hwnd);
                 Sleep(100); // Short pause
+                actionOnGoing = false;
             } else if (id == ID_CLOSE) { // Check if the ID is 2002 (Close)
                 if (ConfirmClose(hwnd)) { // Display confirmation dialog
                     MinimizeToTray(hwnd); // Minimize the window to the tray
@@ -3394,22 +3418,25 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     //InvalidateWindow(hwnd);
                     Sleep(100); // Short pause
                 }
-                } else if (id == ID_EXIT_BUTTON || LOWORD(wParam) == ID_CTRL_Q) {
-                    SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-                    //int result = MessageBox(NULL, L"Are you sure you want to exit the 'Many Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST);
-                    int result = ShowMessageBoxAndHandleTimers(NULL, L"Are you sure you want to exit the 'Many Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST, timers);
+                actionOnGoing = false;
+            } else if (id == ID_EXIT_BUTTON || LOWORD(wParam) == ID_CTRL_Q) {
+                SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                //int result = MessageBox(NULL, L"Are you sure you want to exit the 'Many Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST);
+                int result = ShowMessageBoxAndHandleTimers(NULL, L"Are you sure you want to exit the 'Many Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST, timers);
 
-                    if (result == IDYES)
-                    {
-                        PostQuitMessage(0);
-                    }
-                    else
-                    {
-                        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-                    }
-                } else if (id == ID_CLOSE_PROGRAMM || LOWORD(wParam) == ID_CTRL_W) {
+                if (result == IDYES)
+                {
+                    PostQuitMessage(0);
+                }
+                else
+                {
+                    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                }
+                actionOnGoing = false;
+            } else if (id == ID_CLOSE_PROGRAMM || LOWORD(wParam) == ID_CTRL_W) {
                     MinimizeToTray(hwnd); // Minimize the window to the tray
-                } else if (id == ID_SAVEANDCLOSE) { // Check if the ID is SAVEANDCLOSE
+                    actionOnGoing = false;
+            } else if (id == ID_SAVEANDCLOSE) { // Check if the ID is SAVEANDCLOSE
                 if (ConfirmClose(hwnd)) { // Display confirmation dialog
                     ProcessMessages(); // Process messages
                     MinimizeToTray(hwnd); // Minimize the window to the tray
@@ -3466,6 +3493,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     //InvalidateWindow(hwnd);
                     Sleep(100); // Short pause
                 }
+                actionOnGoing = false;
             } else if (id == ID_CLOSE) { // Check if the ID is CLOSE
                 if (ConfirmClose(hwnd)) { // Display confirmation dialog
                     ProcessMessages(); // Process messages
@@ -3498,150 +3526,153 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     //InvalidateWindow(hwnd);
                     Sleep(100); // Short pause
                 }
+                actionOnGoing = false;
             } else if ((id >= ID_ARRANGE && id <= ID_ARRANGE + screenCount) || LOWORD(wParam) == ID_CTRL_N) {//else if (id == 2003) { Check if the ID is 2003 (Arrange)
                 //std::cout << "arrange" << std::endl;
                 MinimizeToTray(hwnd); // Minimize the window to the tray
                 //MessageBoxW(hwnd, L"aha2", L"Debug Info", MB_OK);
                 ClearTemporaryTiles();
-                int screenIndex = 0;
-                if (id != ID_CTRL_N) 
-                    screenIndex = (id - ID_ARRANGE);
-                else
-                {
-                    std::vector<MonitorInfo> monitors;
-                    EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, (LPARAM)&monitors);
-                    globalScreenIndexChosen++;
-                    if (globalScreenIndexChosen > monitors.size()) globalScreenIndexChosen = 1;
-                    if (monitors.size() > 1) screenIndex = globalScreenIndexChosen - 1;
-                }
-                //std::cout << id << " " << screenIndex << std::endl;
-
-                RECT screenRect = GetScreenRect(screenIndex);
-                //RECT rect; // Declaration of a RECT structure
-                //GetClientRect(hwnd, &rect); // Retrieve the client rectangles of the window
-                //int screenWidth = GetSystemMetrics(SM_CXSCREEN); // Retrieve the screen width
-                int screenWidth = screenRect.right - screenRect.left;
-                int screenHeight = screenRect.bottom - screenRect.top - getTaskbarHeight(hwnd);
-                //int screenHeight = GetSystemMetrics(SM_CYSCREEN); // Retrieve the screen height
-                //std::cout << "screenWidth : " << screenWidth << std::endl;
-
-                int numWindows = 0; // Counter for the number of windows
-                for (auto& entry : processWindowsMap) { // Iterate through all processes
-                    for (auto& window : entry.second) { // Iterate through all windows of a process
-                        if (window.checked) { // Check if the window is selected
-                            window.arranged = true; 
-                            numWindows++; // Increment the counter
-                        }
+                //std::thread([hwnd, id]() {
+                    int screenIndex = 0;
+                    if (id != ID_CTRL_N) 
+                        screenIndex = (id - ID_ARRANGE);
+                    else
+                    {
+                        std::vector<MonitorInfo> monitors;
+                        EnumDisplayMonitors(NULL, NULL, MonitorEnumProc, (LPARAM)&monitors);
+                        globalScreenIndexChosen++;
+                        if (globalScreenIndexChosen > monitors.size()) globalScreenIndexChosen = 1;
+                        if (monitors.size() > 1) screenIndex = globalScreenIndexChosen - 1;
                     }
-                }
+                    //std::cout << id << " " << screenIndex << std::endl;
 
-                int cols = static_cast<int>(ceil(sqrt(numWindows))); // Calculate the number of columns
-                int rows = (numWindows + cols - 1) / cols; // Calculate the number of rows
+                    RECT screenRect = GetScreenRect(screenIndex);
+                    //RECT rect; // Declaration of a RECT structure
+                    //GetClientRect(hwnd, &rect); // Retrieve the client rectangles of the window
+                    //int screenWidth = GetSystemMetrics(SM_CXSCREEN); // Retrieve the screen width
+                    int screenWidth = screenRect.right - screenRect.left;
+                    int screenHeight = screenRect.bottom - screenRect.top - getTaskbarHeight(hwnd);
+                    //int screenHeight = GetSystemMetrics(SM_CYSCREEN); // Retrieve the screen height
+                    //std::cout << "screenWidth : " << screenWidth << std::endl;
 
-                int windowWidth = (screenWidth) / cols; // Calculate the window width
-                int windowHeight = (screenHeight) / rows; // Calculate the window height
-
-                int x = 0, y = 0; // Initialize the X and Y positions
-                int maxAdjustedWidth = 0;
-                int minAdjustedWidth = screenWidth;
-                numWindows = 0;
-//std::cout << "arrange1" << std::endl;
-                // Zuerst die Breite des breitesten Fensters ermitteln
-                for (const auto& entry : processWindowsMap) { // Iterate through all processes
-                    for (const auto& window : entry.second) { // Iterate through all windows of a process
-                        if (window.checked) { // Check if the window is selected
-                            if (IsIconic(window.hwnd) || IsZoomed(window.hwnd)) ShowWindow(window.hwnd, SW_RESTORE); // Restore the window if minimized or maximized
-                            //SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
-                            MoveWindowToScreen(window.hwnd, screenIndex);
-                            ProcessMessages(); // Process messages
-                            //ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
-                            if (IsIconic(window.hwnd) || IsZoomed(window.hwnd)) ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
-                            SetForegroundWindow(window.hwnd); // Bring the window to the foreground
-                            ProcessMessages(); // Process messages
-                            //MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, 50, 50, TRUE); // Move and resize the window
-                            //ProcessMessages(); // Process messages
-                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth - 5, windowHeight, TRUE); // Move and resize the window
-                            ProcessMessages(); // Process messages
-
-                            x += windowWidth; // Increment the X position
-                            if (x >= screenWidth - 20) { // Check if the X position exceeds the screen width
-                                x = 0; // Reset the X position
-                                y += windowHeight; // Increment the Y position
-                            }
-                            Sleep(100);
-                            // Größe des klienten Bereichs ermitteln
-                            RECT clientRect;
-                            GetClientRect(window.hwnd, &clientRect);
-                            int clientWidth = clientRect.right - clientRect.left;
-                            int clientHeight = clientRect.bottom - clientRect.top;
-
-                            // Fensterstil und erweiterte Stile ermitteln
-                            DWORD style = GetWindowLong(window.hwnd, GWL_STYLE);
-                            DWORD exStyle = GetWindowLong(window.hwnd, GWL_EXSTYLE);
-
-                            // Anpassung der Fenstergröße basierend auf dem klienten Bereich
-                            RECT adjustedRect = {0, 0, clientWidth, clientHeight};
-                            AdjustWindowRectEx(&adjustedRect, style, FALSE, exStyle);
-
-                            // Berechnete Fenstergröße
-                            int adjustedWidth = adjustedRect.right - adjustedRect.left;
-                            int adjustedHeight = adjustedRect.bottom - adjustedRect.top;
-                            //std::cout << windowWidth << " " << adjustedWidth << std::endl;
-                            // Aktualisiere die maximale Breite
-                            if (adjustedWidth > maxAdjustedWidth) {
-                                maxAdjustedWidth = adjustedWidth;
-                            }
-                            // Aktualisiere die minimal Breite
-                            if (adjustedWidth < minAdjustedWidth) {
-                                minAdjustedWidth = adjustedWidth;
-                            }
-
-                            numWindows++; // Increment the counter
-                        }
-                    }
-                }
-
-                //std::cout << "minAdjustedWidth: " << minAdjustedWidth << std::endl;
-                //std::cout << "cols: " << cols << std::endl;
-                // Anzahl der Fenster nebeneinander und die Anzahl der Fensterreihen berechnen
-                //std::cout << maxAdjustedWidth << " " << screenWidth << " " << cols << std::endl;
-                cols = screenWidth / std::max(maxAdjustedWidth, screenWidth/cols);
-                                //std::cout << cols << std::endl;
-                //std::cout << "cols: " << cols << std::endl;                
-                rows = (numWindows + cols - 1) / cols;
-                                //std::cout << rows << std::endl;
-                windowWidth = screenWidth / cols; // Calculate the window width
-                //std::cout << windowWidth << std::endl;
-                windowHeight = (screenHeight) / rows; // Calculate the window height
-//std::cout << windowHeight << std::endl;
-                // Fenster anordnen
-                x = 0;
-                y = 0;
-                for (const auto& entry : processWindowsMap) { // Iterate through all processes
-                    for (const auto& window : entry.second) { // Iterate through all windows of a process
-                        if (window.checked) { // Check if the window is selected
-                            MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth, windowHeight, TRUE); // Move and resize the window
-                            ProcessMessages(); // Process messages
-
-                            x += windowWidth; // Increment the X position
-                            if (x >= screenWidth - 20) { // Check if the X position exceeds the screen width
-                                x = 0; // Reset the X position
-                                y += windowHeight; // Increment the Y position
+                    int numWindows = 0; // Counter for the number of windows
+                    for (auto& entry : processWindowsMap) { // Iterate through all processes
+                        for (auto& window : entry.second) { // Iterate through all windows of a process
+                            if (window.checked) { // Check if the window is selected
+                                window.arranged = true; 
+                                numWindows++; // Increment the counter
                             }
                         }
                     }
-                }
-                for (auto& entry : processWindowsMap) { // Iterate through all processes
-                    for (auto& window : entry.second) { // Iterate through all windows of a process
-                        window.checked = false; // Deselect the window
+                    if (numWindows == 0) return 0;
+                    int cols = static_cast<int>(ceil(sqrt(numWindows))); // Calculate the number of columns
+                    int rows = (numWindows + cols - 1) / cols; // Calculate the number of rows
+
+                    int windowWidth = (screenWidth) / cols; // Calculate the window width
+                    int windowHeight = (screenHeight) / rows; // Calculate the window height
+
+                    int x = 0, y = 0; // Initialize the X and Y positions
+                    int maxAdjustedWidth = 0;
+                    int minAdjustedWidth = screenWidth;
+                    numWindows = 0;
+                    //std::cout << "arrange1" << std::endl;
+                    // Zuerst die Breite des breitesten Fensters ermitteln
+                    for (const auto& entry : processWindowsMap) { // Iterate through all processes
+                        for (const auto& window : entry.second) { // Iterate through all windows of a process
+                            if (window.checked) { // Check if the window is selected
+                                if (IsIconic(window.hwnd) || IsZoomed(window.hwnd)) ShowWindow(window.hwnd, SW_RESTORE); // Restore the window if minimized or maximized
+                                //SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
+                                MoveWindowToScreen(window.hwnd, screenIndex);
+                                ProcessMessages(); // Process messages
+                                //ShowWindow(window.hwnd, SW_MINIMIZE); // Minimize the window
+                                if (IsIconic(window.hwnd) || IsZoomed(window.hwnd)) ShowWindow(window.hwnd, SW_RESTORE); // Restore the window
+                                SetForegroundWindow(window.hwnd); // Bring the window to the foreground
+                                ProcessMessages(); // Process messages
+                                //MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, 50, 50, TRUE); // Move and resize the window
+                                //ProcessMessages(); // Process messages
+                                MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth - 5, windowHeight, TRUE); // Move and resize the window
+                                ProcessMessages(); // Process messages
+
+                                x += windowWidth; // Increment the X position
+                                if (x >= screenWidth - 20) { // Check if the X position exceeds the screen width
+                                    x = 0; // Reset the X position
+                                    y += windowHeight; // Increment the Y position
+                                }
+                                Sleep(100);
+                                // Größe des klienten Bereichs ermitteln
+                                RECT clientRect;
+                                GetClientRect(window.hwnd, &clientRect);
+                                int clientWidth = clientRect.right - clientRect.left;
+                                int clientHeight = clientRect.bottom - clientRect.top;
+
+                                // Fensterstil und erweiterte Stile ermitteln
+                                DWORD style = GetWindowLong(window.hwnd, GWL_STYLE);
+                                DWORD exStyle = GetWindowLong(window.hwnd, GWL_EXSTYLE);
+
+                                // Anpassung der Fenstergröße basierend auf dem klienten Bereich
+                                RECT adjustedRect = {0, 0, clientWidth, clientHeight};
+                                AdjustWindowRectEx(&adjustedRect, style, FALSE, exStyle);
+
+                                // Berechnete Fenstergröße
+                                int adjustedWidth = adjustedRect.right - adjustedRect.left;
+                                int adjustedHeight = adjustedRect.bottom - adjustedRect.top;
+                                //std::cout << windowWidth << " " << adjustedWidth << std::endl;
+                                // Aktualisiere die maximale Breite
+                                if (adjustedWidth > maxAdjustedWidth) {
+                                    maxAdjustedWidth = adjustedWidth;
+                                }
+                                // Aktualisiere die minimal Breite
+                                if (adjustedWidth < minAdjustedWidth) {
+                                    minAdjustedWidth = adjustedWidth;
+                                }
+
+                                numWindows++; // Increment the counter
+                            }
+                        }
                     }
-                }
-                for (auto& state : checkboxState) { // Iterate through all checkbox states
-                    state.second = false; // Deselect the checkbox
-                }
-                for (auto& state : expandedState) { // Iterate through all expanded states
-                    state.second = false; // Collapse the expanded state
-                }
+
+                    //std::cout << "minAdjustedWidth: " << minAdjustedWidth << std::endl;
+                    //std::cout << "cols: " << cols << std::endl;
+                    // Anzahl der Fenster nebeneinander und die Anzahl der Fensterreihen berechnen
+                    //std::cout << maxAdjustedWidth << " " << screenWidth << " " << cols << std::endl;
+                    cols = screenWidth / std::max(std::max(maxAdjustedWidth, screenWidth/cols), 1);
+                                    //std::cout << cols << std::endl;
+                    //std::cout << "cols: " << cols << std::endl;                
+                    rows = (numWindows + cols - 1) / cols;
+                                    //std::cout << rows << std::endl;
+                    windowWidth = screenWidth / cols; // Calculate the window width
+                    //std::cout << windowWidth << std::endl;
+                    windowHeight = (screenHeight) / rows; // Calculate the window height
+                    //std::cout << windowHeight << std::endl;
+                    // Fenster anordnen
+                    x = 0;
+                    y = 0;
+                    for (const auto& entry : processWindowsMap) { // Iterate through all processes
+                        for (const auto& window : entry.second) { // Iterate through all windows of a process
+                            if (window.checked) { // Check if the window is selected
+                                MoveWindow(window.hwnd, screenRect.left + x, screenRect.top + y, windowWidth, windowHeight, TRUE); // Move and resize the window
+                                ProcessMessages(); // Process messages
+
+                                x += windowWidth; // Increment the X position
+                                if (x >= screenWidth - 20) { // Check if the X position exceeds the screen width
+                                    x = 0; // Reset the X position
+                                    y += windowHeight; // Increment the Y position
+                                }
+                            }
+                        }
+                    }
+                    for (auto& entry : processWindowsMap) { // Iterate through all processes
+                        for (auto& window : entry.second) { // Iterate through all windows of a process
+                            window.checked = false; // Deselect the window
+                        }
+                    }
+                    for (auto& state : checkboxState) { // Iterate through all checkbox states
+                        state.second = false; // Deselect the checkbox
+                    }
+                    for (auto& state : expandedState) { // Iterate through all expanded states
+                        state.second = false; // Collapse the expanded state
+                    }
+                //}).detach();
                 InvalidateRect(hwnd, NULL, TRUE); // Invalidate and redraw the window
                 UpdateWindowList(hwnd); // Update the window list
                 AdjustWindowSize(hwnd); // Adjust the window size
@@ -3649,7 +3680,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 Sleep(100); // Short pause
                 //InvalidateWindow(hwnd);
                 ProcessMessages(); // Process messages
+                actionOnGoing = false;
             } else if (id == ID_TRAY_EXIT) { // Check if the ID is for tray exit
+                actionOnGoing = false;
                 PostQuitMessage(0); // Quit the application
             } else if (id >= ID_SELECT_SCREEN_BASE && id <= ID_SELECT_SCREEN_BASE + screenCount) {
                 std::vector<MonitorInfo> monitors;
@@ -3707,7 +3740,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 InvalidateRect(hwnd, NULL, TRUE);
                     //std::cout << "Invalidated rect for process: " << processName << std::endl;
                 
-            
+                actionOnGoing = false;
             } else if ((id >= ID_MOVE_TO_SCREEN_BASE && id <= ID_MOVE_TO_SCREEN_BASE + screenCount) || LOWORD(wParam) == ID_CTRL_M) { // Check if the ID is 2004ff (Move to Screen x)
                 MinimizeToTray(hwnd); // Minimize the window to the tray
                 ClearTemporaryTiles();
@@ -3741,6 +3774,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 ProcessMessages(); // Process messages
                 //InvalidateWindow(hwnd);
                 Sleep(100); // Short pause
+                actionOnGoing = false;
             } else if (id >= ID_PROCESSNAMESTART && id < ID_PROCESSNAMESTART + processNames.size()) { // Check if the ID is within the range of process names and thus collapse/expand needed
                 //MessageBoxW(hwnd, L"aha3", L"Debug Info", MB_OK);
                 std::wstring processName = processNames[id - ID_PROCESSNAMESTART]; // Retrieve the process name based on the ID
@@ -3801,31 +3835,37 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 AdjustWindowSize(hwnd); // Adjust the window size
                 //InvalidateRect(hwnd, NULL, TRUE);
                 //InvalidateWindow(hwnd);
+                actionOnGoing = false;
             } else if (HIWORD(wParam) == EN_SETFOCUS && LOWORD(wParam) == IDC_SEARCHBOX) {
                 wchar_t text[256];
                 GetWindowText(hSearchBox, text, 256);
                 if (wcscmp(text, L"\u2315 Search Name (CTRL-F)") == 0) {
                     //SetWindowText(hSearchBox, L"");
                 }
+                actionOnGoing = false;
             } else if (id == ID_REFRESH || LOWORD(wParam) == ID_CTRL_F) {
                 RefreshWindowList(hwnd);
                 SetForegroundWindow(hwnd);
                 SetFocus(hwnd);
+                actionOnGoing = false;
             } else if (HIWORD(wParam) == EN_KILLFOCUS && LOWORD(wParam) == IDC_SEARCHBOX) {
                 wchar_t text[256];
                 GetWindowText(hSearchBox, text, 256);
                 if (wcslen(text) == 0) {
                     //SetEditPlaceholder(hSearchBox, L"\u2315 Search Name (CTRL-F)");
                 }
+                actionOnGoing = false;
             } else if (HIWORD(wParam) == EN_CHANGE && LOWORD(wParam) == IDC_SEARCHBOX) {
                 wchar_t searchString[256];
                 GetWindowTextW(hSearchBox, searchString, 256);
                 SearchAndCheck(searchString, hwnd);
                 SetFocus(hwnd);
+                actionOnGoing = false;
             } else if (LOWORD(wParam) == ID_CTRL_A) {
                 // Ctrl+A was pressed
                 SetFocus(hSearchBox);
                 SendMessage(hSearchBox, EM_SETSEL, 0, -1); // Select all text in the search box
+                actionOnGoing = false;
             } else if (LOWORD(wParam) == ID_SELECT_ALL || LOWORD(wParam) == ID_CTRL_S) {
                 // Ctrl+S was pressed
                 for (size_t i = 0; i < processNames.size(); ++i)
@@ -3838,6 +3878,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     }
                     InvalidateRect(hwnd, NULL, TRUE);
                 }
+                actionOnGoing = false;
             } else if (LOWORD(wParam) == ID_SELECT_NONE || LOWORD(wParam) == ID_CTRL_U) {
                 // Ctrl+U was pressed
                 for (size_t i = 0; i < processNames.size(); ++i)
@@ -3850,6 +3891,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     }
                     InvalidateRect(hwnd, NULL, TRUE);
                 }
+                actionOnGoing = false;
             }
             if (LOWORD(wParam) == ID_ABOUT) {
                 MessageBox(hwnd,
@@ -3865,9 +3907,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     L"CTRL+M:\t\tMove Window(s)\n"
                     L"CTRL+S:\t\tSelect All Windows\n"
                     L"CTRL+U:\t\tUn-select All Windows\n"
+                    L"CTRL+F:\t\tFind\n"
                     L"CTRL+W:\t\tClose Program to Tray\n"
                     L"CTRL+Q:\t\tExit Program\n\n\n"
-                    L"v1.1.110225",
+                    L"v1.02.1225",
                     L"About",
                     MB_OK);
             }
@@ -4617,7 +4660,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Register the hotkey (CTRL+SHIFT+M)
     if (!RegisterHotKey(hwnd, HOTKEY_ID, MOD_CONTROL | MOD_SHIFT, 'M')) {
         //std::cout << "Failed to register hotkey" << std::endl;
-        return 1;
+        return 0;
     }
 
     // Register the hotkey (CTRL+X)
