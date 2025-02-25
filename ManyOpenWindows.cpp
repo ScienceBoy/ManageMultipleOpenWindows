@@ -1,3 +1,33 @@
+// Update log:
+// 2025.02.10: First version pushed to Windows Store
+// 2025.02.12: Changed the exit-button on the context menu of the tray icon
+// 2025.02.12: Removed the move to main screen for the action "minimize"
+// 2025.02.12: Added bool actionOnGoing to avoid an actions is started before a former action has finished
+// 2025.02.12: Pushed to Windows Store as v1.02.1225
+// 2025.02.12: Removed the move to main screen for the action "minimize" when started via contect menu of the tray icon
+// 2025.02.12: Allowed more special characters in search field, e.g. "dot" and "question mark" and french characters
+// 2025.02.12: Added MinimizeToTray(hwnd); when GOTO-BUTTON was used to close the main window
+// 2025.02.12: Added SHIFT+HOME to select the text in the search box
+// 2025.02.12: Added checks for each division to avoid division-by-zero errors
+// 2025.02.12: Added "msedgewebview2.exe" and "PDSyleAgent.exe" to list of ignored windows
+// 2025.02.13: Pushed to Windows Store as v1.02.1325
+// 2025.02.13: Changed version number to always be "v1.mm.ddyy"
+// 2025.02.14: Reduced minimum height of main window to 100 pixels
+// 2025.02.14: Removed call of AdjustWindowSize() in SearchAndCheck()
+// 2025.02.14: Added animation AnimateWindowResize() when changing height of main window
+// 2025.02.14: Fixed "jumping" of searchBox by moving UpdateControlPositions(hwnd); to almost the end of wm_paint
+// 2025.02.15: Pushed to Windows Store as v1.02.1525
+// 2025.02.21: Changed number of selected and total windows to two-digits and added the word "selected" as well as the list of selected window names after them
+// 2025.02.21: Introduced bool windowReady to not react on key up / down before window is shown & ready
+// 2025.02.22: Changed from displaying (3/12) to (12 windows) if no window of this process is selected or (02 / 12 selected) [ window title 1 ] [ window titel 2 ] if selected
+// 2025.02.22: Made the main windows resizable to allow more text horizontalle
+// 2025.02.22: Added a toolbar, but not yet with correct icons and with call of actions
+// 2025.02.22: Calling the scrollbar update via UpdateScrollBar only if there was a change in the content
+// 2025.02.23: Added the icons to the toolbar and made them trigger actions
+// 2025.02.24: Changed the relevant " + 30" to " + heightToolbar" to be flexible in toolbar height
+// 2025.02.24: Changed the toolbar height from 16px to 24px
+// 2025.02.24: Set a minimum of (200 + heightToolbar) for the main window to avoid continuous repainting and hidden text
+
 //#define UNICODE
 //#define _UNICODE
 #define NOMINMAX
@@ -15,7 +45,6 @@
 #include <cctype>
 #include <clocale>
 #include <cwctype>
-#include <iostream>
 #include <commctrl.h>
 #include <map>
 #include <shellapi.h>
@@ -24,6 +53,9 @@
 #include <dwmapi.h>
 #include <thread>
 #include <functional>
+#include <ctime>
+#include <sstream>
+#include <iomanip>
 #pragma comment(lib, "Dwmapi.lib")
 #pragma comment(lib, "psapi.lib") // Link psapi.lib library
 
@@ -38,9 +70,11 @@ extern "C" UINT GetDpiForWindow(HWND hwnd);
 
 #define WM_TRAYICON (WM_USER + 1) // Define a custom message for the tray icon
 #define WM_UPDATE_LIST (WM_USER + 2) // Define a custom message to update the window list
+
 #define IDC_SEARCHBOX            101
 #define IDC_ERASEBUTTON          201
 #define IDC_GOTOBUTTON           301
+
 #define ID_MINIMIZE             2000
 #define ID_RESTORE              2001
 #define ID_CLOSE                2002
@@ -52,9 +86,21 @@ extern "C" UINT GetDpiForWindow(HWND hwnd);
 #define ID_FILE_EXIT            2060
 #define ID_SIZE_MINIMIZE        2070
 #define ID_PROCESSNAMESTART     3000
-#define IDI_ICON_MINIMIZE       3101
-#define IDI_ICON_ARRANGE        3102
-#define IDI_ICON_CLOSE          3103
+
+#define IDI_ICON_MINIMIZE_contextmenu       3101
+#define IDI_ICON_ARRANGE_contextmenu        3102
+#define IDI_ICON_CLOSE_contextmenu          3103
+/*#define IDI_ICON_ABOUT          3104
+#define IDI_ICON_EXIT           3105
+#define IDI_ICON_MAXIMIZE       3107
+#define IDI_ICON_MOVE           3108
+#define IDI_ICON_REFRESH        3109
+#define IDI_ICON_RESTORE        3110
+#define IDI_ICON_SAVE           3111
+#define IDI_ICON_SELECTALL      3112
+#define IDI_ICON_UNSELECTALL    3113
+#define IDI_ICON_SELECTONSCREEN 3114*/
+
 #define ID_EXIT_BUTTON          3200 
 #define ID_CLOSE_PROGRAMM       3250
 #define ID_QUITMENU_BUTTON      3300
@@ -81,6 +127,24 @@ extern "C" UINT GetDpiForWindow(HWND hwnd);
 #define ID_SELECT_VISIBLE       3880 
 #define ID_REFRESH              3890
 #define ID_ABOUT                3900
+
+#define IDB_TOOLBAR             5000
+#define IDI_ICON_REFRESH        5001
+#define IDI_ICON_CLOSE          5002
+#define IDI_ICON_EXIT           5003
+#define IDI_ICON_MINIMIZE       5004
+#define IDI_ICON_MAXIMIZE       5005
+#define IDI_ICON_RESTORE        5006
+#define IDI_ICON_ARRANGE        5007
+#define IDI_ICON_MOVE           5008
+#define IDI_ICON_SELECT_SCREEN  5009
+#define IDI_ICON_SELECTALL      5010
+#define IDI_ICON_UNSELECTALL    5011
+#define IDI_ICON_SAVE           5012
+#define IDI_ICON_ABOUT          5013
+#define IDI_ICON                5014
+#define IDI_ICON_SELECTONSCREEN 5015
+
 #define HOTKEY_ID               9000
 #define HOTKEY_EXIT             9001
 
@@ -108,6 +172,7 @@ struct MonitorInfo {
     HMONITOR hMonitor;
 };
 
+
 // Function declarations
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam); // Callback function to list open windows
 std::vector<WindowInfo> getOpenWindows(); // Function to return open windows
@@ -130,6 +195,7 @@ void ShowTemporaryTiles(HWND hwnd, int screenIndex);
 void GetScreenCaptures(bool forceRecreate);
 HMENU CreateSelectScreenMenu(HMENU hMenu, bool forceRecreate);
 BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData);
+void LoadIcons(HINSTANCE hInstance);
 
 // Global variables
 static std::unordered_map<std::wstring, std::vector<WindowInfo>> processWindowsMap; // Hashmap to store windows by processes
@@ -153,6 +219,7 @@ int highlightedWindowRow = -1; // Globale Variable zur Speicherung der hervorgeh
 bool isRedrawPending = false;
 int screenCount = 1;
 int textWidth = 900;
+const int minWidth = 900; // Lege eine minimale Breite fest
 static int defaultYPos = -1;
 static int defaultXPos = 0;
 bool blinkState = false; // Globale Variable für den Blinkzustand
@@ -179,6 +246,12 @@ int widthSecondLargestMonitor = 0;
 int previousHeight = 0;
 POINT prevPt = { -1, -1 };
 bool actionOnGoing = false;
+bool windowReady = false;
+HWND hwndToolbar = NULL;;
+int previousNumberOfItems = 0;
+HIMAGELIST hImageList;
+HICON hIconMinimize, hIconArrange, hIconClose, hIconAbout, hIconExit, hIconIcon, hIconMaximize, hIconMove, hIconRefresh, hIconRestore, hIconSave, hIconSelectAll, hIconUnselectAll, hIconSelectOnScreen;
+int heightToolbar = 48;
 
 std::vector<TimerInfo> timers = {
     {BLINKING_TIMER_ID, BLINKING_TIMER_ID_time},
@@ -215,6 +288,66 @@ void RestartTimers(HWND hwnd, std::vector<TimerInfo>& timers, std::vector<BOOL>&
     }
 }
 
+void LoadIcons(HINSTANCE hInstance) {
+    hImageList = ImageList_Create(heightToolbar/2, heightToolbar / 2, ILC_COLOR32 | ILC_MASK, 14, 0);
+    if (!hImageList) {
+        MessageBox(NULL, L"Failed to create image list.", L"Error", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    hIconMinimize = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_MINIMIZE));
+    if (!hIconMinimize) MessageBox(NULL, L"Failed to load icon: IDI_ICON_MINIMIZE", L"Error", MB_OK | MB_ICONERROR);
+
+    hIconArrange = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_ARRANGE));
+    if (!hIconArrange) MessageBox(NULL, L"Failed to load icon: IDI_ICON_ARRANGE", L"Error", MB_OK | MB_ICONERROR);
+
+    hIconClose = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_CLOSE));
+    if (!hIconClose) MessageBox(NULL, L"Failed to load icon: IDI_ICON_CLOSE", L"Error", MB_OK | MB_ICONERROR);
+
+    hIconAbout = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_ABOUT));
+    if (!hIconAbout) MessageBox(NULL, L"Failed to load icon: IDI_ICON_ABOUT", L"Error", MB_OK | MB_ICONERROR);
+
+    hIconExit = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_EXIT));
+    if (!hIconExit) MessageBox(NULL, L"Failed to load icon: IDI_ICON_EXIT", L"Error", MB_OK | MB_ICONERROR);
+
+    hIconMaximize = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_MAXIMIZE));
+    if (!hIconMaximize) MessageBox(NULL, L"Failed to load icon: IDI_ICON_MAXIMIZE", L"Error", MB_OK | MB_ICONERROR);
+
+    hIconMove = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_MOVE));
+    if (!hIconMove) MessageBox(NULL, L"Failed to load icon: IDI_ICON_MOVE", L"Error", MB_OK | MB_ICONERROR);
+
+    hIconRefresh = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_REFRESH));
+    if (!hIconRefresh) MessageBox(NULL, L"Failed to load icon: IDI_ICON_REFRESH", L"Error", MB_OK | MB_ICONERROR);
+
+    hIconRestore = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_RESTORE));
+    if (!hIconRestore) MessageBox(NULL, L"Failed to load icon: IDI_ICON_RESTORE", L"Error", MB_OK | MB_ICONERROR);
+
+    hIconSave = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_SAVE));
+    if (!hIconSave) MessageBox(NULL, L"Failed to load icon: IDI_ICON_SAVE", L"Error", MB_OK | MB_ICONERROR);
+
+    hIconSelectAll = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_SELECTALL));
+    if (!hIconSelectAll) MessageBox(NULL, L"Failed to load icon: IDI_ICON_SELECTALL", L"Error", MB_OK | MB_ICONERROR);
+
+    hIconUnselectAll = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_UNSELECTALL));
+    if (!hIconUnselectAll) MessageBox(NULL, L"Failed to load icon: IDI_ICON_UNSELECTALL", L"Error", MB_OK | MB_ICONERROR);
+
+    hIconSelectOnScreen = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON_SELECTONSCREEN));
+    if (!hIconSelectOnScreen) MessageBox(NULL, L"Failed to load icon: IDI_ICON_SELECTONSCREEN", L"Error", MB_OK | MB_ICONERROR);
+
+    if (ImageList_AddIcon(hImageList, hIconExit) == -1) MessageBox(NULL, L"Failed to add icon: hIconExit", L"Error", MB_OK | MB_ICONERROR);
+    if (ImageList_AddIcon(hImageList, hIconRefresh) == -1) MessageBox(NULL, L"Failed to add icon: hIconRefresh", L"Error", MB_OK | MB_ICONERROR);
+    if (ImageList_AddIcon(hImageList, hIconMinimize) == -1) MessageBox(NULL, L"Failed to add icon: hIconMinimize", L"Error", MB_OK | MB_ICONERROR);
+    if (ImageList_AddIcon(hImageList, hIconMaximize) == -1) MessageBox(NULL, L"Failed to add icon: hIconMaximize", L"Error", MB_OK | MB_ICONERROR);
+    if (ImageList_AddIcon(hImageList, hIconRestore) == -1) MessageBox(NULL, L"Failed to add icon: hIconRestore", L"Error", MB_OK | MB_ICONERROR);
+    if (ImageList_AddIcon(hImageList, hIconArrange) == -1) MessageBox(NULL, L"Failed to add icon: hIconArrange", L"Error", MB_OK | MB_ICONERROR);
+    if (ImageList_AddIcon(hImageList, hIconMove) == -1) MessageBox(NULL, L"Failed to add icon: hIconMove", L"Error", MB_OK | MB_ICONERROR);
+    if (ImageList_AddIcon(hImageList, hIconSelectAll) == -1) MessageBox(NULL, L"Failed to add icon: hIconSelectAll", L"Error", MB_OK | MB_ICONERROR);
+    if (ImageList_AddIcon(hImageList, hIconUnselectAll) == -1) MessageBox(NULL, L"Failed to add icon: hIconUnselectAll", L"Error", MB_OK | MB_ICONERROR);
+    if (ImageList_AddIcon(hImageList, hIconSelectOnScreen) == -1) MessageBox(NULL, L"Failed to add icon: hIconSelectOnScreen", L"Error", MB_OK | MB_ICONERROR);
+    if (ImageList_AddIcon(hImageList, hIconSave) == -1) MessageBox(NULL, L"Failed to add icon: hIconSave", L"Error", MB_OK | MB_ICONERROR);
+    //if (ImageList_AddIcon(hImageList, hIconClose) == -1) MessageBox(NULL, L"Failed to add icon: hIconClose", L"Error", MB_OK | MB_ICONERROR);
+    if (ImageList_AddIcon(hImageList, hIconAbout) == -1) MessageBox(NULL, L"Failed to add icon: hIconAbout", L"Error", MB_OK | MB_ICONERROR);
+}
 
 BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     //std::cout << "EnumWindowsProc" << std::endl;
@@ -224,9 +357,9 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processId); // Prozess öffnen
     if (hProcess) {
         wchar_t exePath[MAX_PATH]; // Buffer für den Pfad zur ausführbaren Datei
-        if (GetModuleFileNameExW(hProcess, NULL, exePath, sizeof(exePath) / sizeof(wchar_t))) { // Pfad zur ausführbaren Datei abrufen
+        if (GetModuleFileNameExW(hProcess, NULL, exePath, sizeof(wchar_t) != 0 ? sizeof(exePath) / sizeof(wchar_t) : 1)) { // Pfad zur ausführbaren Datei abrufen
             wchar_t processName[MAX_PATH]; // Buffer für den Prozessnamen
-            if (GetModuleBaseNameW(hProcess, NULL, processName, sizeof(processName) / sizeof(wchar_t))) { // Prozessnamen abrufen
+            if (GetModuleBaseNameW(hProcess, NULL, processName, sizeof(wchar_t) != 0 ? sizeof(processName) / sizeof(wchar_t) : 1)) { // Prozessnamen abrufen
                 // Liste der auszuschließenden Prozesse, die von Windows erstellt werden und/oder für den Benutzer nicht nützlich zu sehen sind
                 std::vector<std::wstring> excludedProcesses = {
                     L"TextInputHost.exe",
@@ -239,6 +372,8 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
                     L"dwm.exe",
                     L"smartscreen.exe",
                     L"Pulse.exe",
+                    L"msedgewebview2.exe",
+                    L"PDSyleAgent.exe",
                     L"window_minimizer.exe"
                 };
                 std::wstring processNameStr(processName);
@@ -247,7 +382,7 @@ BOOL CALLBACK EnumWindowsProc(HWND hwnd, LPARAM lParam) {
                     return TRUE; // Prozess ausschließen und Enumeration fortsetzen
                 }
                 if (IsWindowVisible(hwnd) && std::find(excludedProcesses.begin(), excludedProcesses.end(), processName) == excludedProcesses.end()) { // Überprüfen, ob das Fenster sichtbar und nicht ausgeschlossen ist
-                    int length = GetWindowTextW(hwnd, title, sizeof(title) / sizeof(wchar_t)); // Fenstertitel abrufen
+                    int length = GetWindowTextW(hwnd, title, sizeof(wchar_t) != 0 ? sizeof(title) / sizeof(wchar_t) : 1); // Fenstertitel abrufen
                     if (length > 0 && wcscmp(title, L"Program Manager") != 0 && wcscmp(title, L"JamPostMessageWindow") != 0) { // "Program Manager" ausschließen
                         if (processNameStr.length() > 4 && 
                             (processNameStr.substr(processNameStr.length() - 4) == L".exe" || 
@@ -283,12 +418,31 @@ int getTaskbarHeight(HWND hwnd) {
         if (GetWindowRect(taskbar, &rect)) {
             UINT dpi = GetDpiForWindow(hwnd);
             float scaleFactor = dpi / 96.0f; // 96 ist der Standard-DPI-Wert
-            int taskbarHeight = (rect.bottom - rect.top) / scaleFactor;
+            int taskbarHeight = scaleFactor != 0 ? (rect.bottom - rect.top) / scaleFactor : 80;
             //std::cout << "taskbar height: " << taskbarHeight << std::endl;
             return taskbarHeight;
         }
     }
     return 0; // Fehlerfall
+}
+
+void UpdateScrollBar(HWND hwnd, int nmbOfItemsOnWindow) {
+    // Überprüfe, ob sich die Anzahl der Elemente geändert hat
+    if (nmbOfItemsOnWindow != previousNumberOfItems) {
+        // Aktualisiere die vorherige Anzahl der Elemente
+        previousNumberOfItems = nmbOfItemsOnWindow;
+
+        // SCROLLINFO-Struktur initialisieren
+        SCROLLINFO si = {};
+        si.cbSize = sizeof(si);
+        si.fMask = SIF_RANGE | SIF_PAGE;
+        si.nMin = 0;
+        si.nMax = std::max(nmbOfItemsOnWindow * 30 + 30, 30);
+        si.nPage = si.nMax / std::max(nmbOfItemsOnWindow, 1);
+
+        // Scrollinformationen für den vertikalen Scrollbalken setzen
+        SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+    }
 }
 
 // Function to return open windows
@@ -468,9 +622,9 @@ LRESULT CALLBACK OverlayWindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM l
 
             if (numWindows > 0) {
                 int cols = static_cast<int>(ceil(sqrt(numWindows)));
-                int rows = (numWindows + cols - 1) / cols;
-                int windowWidth = (rect.right - rect.left) / cols;
-                int windowHeight = (rect.bottom - rect.top) / rows;
+                int rows = cols > 0 ? (numWindows + cols - 1) / cols : 1;
+                int windowWidth = cols > 0 ? (rect.right - rect.left) / cols : 1;
+                int windowHeight = rows > 0 ? (rect.bottom - rect.top) / rows : 1;
 
                 int x = 0, y = 0;
                 for (int counter = 0; counter < numWindows; counter++) {
@@ -526,9 +680,9 @@ void ShowTemporaryTiles(HWND hwnd, int screenIndex) { // Diese Funktion wird nic
 
         if (numWindows > 0) {
             int cols = static_cast<int>(ceil(sqrt(numWindows)));
-            int rows = (numWindows + cols - 1) / cols;
-            int windowWidth = screenWidth / cols;
-            int windowHeight = screenHeight / rows;
+            int rows = cols > 0 ? (numWindows + cols - 1) / cols : 1;
+            int windowWidth = cols > 0 ? screenWidth / cols : 1;
+            int windowHeight = rows > 0 ? screenHeight / rows : 1;
 
             HDC hdcScreen = GetDC(hwnd);
             if (!hdcScreen) {
@@ -686,15 +840,16 @@ BOOL CALLBACK MonitorEnumProcSpecial(HMONITOR hMonitor, HDC hdcMonitor, LPRECT l
 }
 
 bool IsValidInput(const wchar_t* input) {
-    //std::cout << "IsValidInput" << std::endl;
     while (*input) {
         if (!iswalnum(*input) && // Alphanumerische Zeichen
             *input != L'\\' && *input != L'/' && // Backslash und Forwardslash
-            *input != L'[' && *input != L']' && *input != L'*' && *input != L'-' && *input != L'+' && *input != L'*' && *input != L'=' && *input != L'!' &&
+            *input != L'[' && *input != L']' && *input != L'*' && *input != L'-' && *input != L'+' && *input != L'*' && *input != L'=' && *input != L'!' && *input != L'?' &&
             *input != L'{' && *input != L'}' && *input != L'&' && *input != L'%' && *input != L'#' && *input != L' ' &&
             *input != L'@' && *input != L'(' && *input != L')' && *input != L'^' && *input != L'~' &&
-            *input != L'é' && *input != L'è' && *input != L'à' && *input != L'$' && *input != L'£' &&
-            *input != L'.' && *input != L'<' && *input != L'>' && *input != L',' &&
+            *input != L'é' && *input != L'è' && *input != L'à' && *input != L'ç' && *input != L'ñ' && *input != L'¡' && *input != L'¿' &&
+            *input != L'ì' && *input != L'ò' && *input != L'ù' && *input != L'$' && *input != L'£' &&
+            *input != L'.' && *input != L'\u00B7' && // Punkt und Mittelpunkt
+            *input != L'<' && *input != L'>' && *input != L',' &&
             *input != L'ä' && *input != L'ö' && *input != L'ü' && *input != L'ß') { // Umlaute
             return false;
         }
@@ -754,8 +909,8 @@ void MoveWindowToScreen(HWND hwnd, int screenIndex) {
 
     //std::cout << currentScreenWidth << " " << currentScreenHeight << std::endl;
 
-    float ratioX = static_cast<float>(newScreenWidth) / currentScreenWidth;
-    float ratioY = static_cast<float>(newScreenHeight) / currentScreenHeight;
+    float ratioX = currentScreenWidth != 0 ? static_cast<float>(newScreenWidth) / currentScreenWidth : 1;
+    float ratioY = currentScreenHeight != 0 ? static_cast<float>(newScreenHeight) / currentScreenHeight : 1;
 
     //std::cout << ratioX << " " << ratioY << std::endl;
 
@@ -896,7 +1051,7 @@ void CreateMoveToScreenMenu(HMENU hMenu, bool forceRecreate = false) {
                                     std::to_wstring(height) + L")";
 
             if (monitor.rect == largestMonitor.rect) {
-                newHeight = static_cast<int>(newHeight * widthLargestMonitor / widthSecondLargestMonitor);
+                newHeight = widthSecondLargestMonitor != 0 ? static_cast<int>(newHeight * widthLargestMonitor / widthSecondLargestMonitor) : 1024;
             }
 
             // Verwenden Sie die HBITMAPs aus dem Cache
@@ -1004,10 +1159,10 @@ void GetScreenCaptures(bool forceRecreate = false) {
     // Berechne das Seitenverhältnis für den breitesten Monitor
     if (width > height) {
         newWidth = 25;
-        newHeight = static_cast<int>(35.0 * height / width);
+        newHeight = width > 0 ? static_cast<int>(35.0 * height / width) : 1280;
     } else {
         newHeight = 25;
-        newWidth = static_cast<int>(35.0 * width / height);
+        newWidth = height > 0 ? static_cast<int>(35.0 * width / height) : 1024;
     }
     firstIconHeight = newHeight; // Speichere die Höhe des ersten Icons
     
@@ -1026,7 +1181,7 @@ void GetScreenCaptures(bool forceRecreate = false) {
                                 std::to_wstring(height) + L")";
 
         if (monitor.rect == largestMonitor.rect) {
-            newHeight = static_cast<int>(newHeight * widthLargestMonitor / widthSecondLargestMonitor);
+            newHeight = widthSecondLargestMonitor != 0 ? static_cast<int>(newHeight * widthLargestMonitor / widthSecondLargestMonitor) : 1024;
         }
 
         // Prüfen, ob HBITMAP bereits vorhanden ist oder neu erzeugt werden soll
@@ -1078,6 +1233,7 @@ bool HasWindowsChanged() {
     
     // Check if any of the windows have changed
     for (size_t i = 0; i < newWindows.size(); ++i) {
+        // Compare window handles, titles, and process names
         // Compare window handles, titles, and process names
         if (newWindows[i].hwnd != currentWindows[i].hwnd || 
             newWindows[i].title != currentWindows[i].title || 
@@ -1145,7 +1301,7 @@ void AdjustWindowToFitMenu(HWND hwnd) {
         mii.fMask = MIIM_STRING;
         wchar_t itemText[256];
         mii.dwTypeData = itemText;
-        mii.cch = sizeof(itemText) / sizeof(itemText[0]);
+        mii.cch = sizeof(itemText[0]) != 0 ? sizeof(itemText) / sizeof(itemText[0]) : 1;
         GetMenuItemInfo(hMenu, i, TRUE, &mii);
 
         SIZE textSize;
@@ -1155,8 +1311,6 @@ void AdjustWindowToFitMenu(HWND hwnd) {
 
     ReleaseDC(hwnd, hdc);
 
-    // Lege eine minimale Breite fest
-    const int minWidth = 900; // Beispielwert, anpassen nach Bedarf
     int newWidth = std::max(totalWidth, minWidth);
 
     RECT windowRect;
@@ -1207,6 +1361,14 @@ HWND CreateTooltip(HWND hwndParent) {
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 
     return hwndTT;
+}
+
+// Funktion zur Konvertierung von std::string in std::wstring
+std::wstring stringToWString(const std::string& str) {
+    int size_needed = MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), NULL, 0);
+    std::wstring wstrTo(size_needed, 0);
+    MultiByteToWideChar(CP_UTF8, 0, &str[0], (int)str.size(), &wstrTo[0], size_needed);
+    return wstrTo;
 }
 
 // Function to update the window list
@@ -1389,6 +1551,41 @@ void UpdateWindowList(HWND hwnd) {
     }
 }
 
+// Funktion, um die aktuelle Fensterhöhe zu erhalten
+int GetWindowHeight(HWND hwnd) {
+    RECT rect;
+    GetWindowRect(hwnd, &rect);
+    return rect.bottom - rect.top;
+}
+
+void AnimateWindowResize(HWND hwnd, int xPos, int yPos, int contentWidth, int newHeight) {
+    const int previousHeight = GetWindowHeight(hwnd); // Aktuelle Fensterhöhe ermitteln
+    const int minHeight = 100;
+    newHeight = std::max(newHeight, minHeight);
+
+    const int steps = 10; // Anzahl der Schritte für die Animation
+    const int delay = 5; // Verzögerung in Millisekunden zwischen den Schritten (10 Schritte * 5 ms = 50 ms)
+    const int heightIncrement = (newHeight - previousHeight) / steps;
+
+    // Ursprünglichen Fokus speichern
+    HWND focusedWindow = GetFocus();
+
+    for (int i = 0; i < steps; ++i) {
+        int currentHeight = previousHeight + heightIncrement * i;
+        SetWindowPos(hwnd, NULL, xPos, yPos, contentWidth, currentHeight, SWP_NOZORDER);
+        // Ursprünglichen Fokus wiederherstellen
+        SetFocus(focusedWindow);
+        SetFocus(focusedWindow);
+        std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+    }
+
+    // Setzen Sie die endgültige Größe, um Rundungsfehler zu vermeiden
+    SetWindowPos(hwnd, NULL, xPos, yPos, contentWidth, newHeight, SWP_NOZORDER);
+
+    // Ursprünglichen Fokus wiederherstellen
+    SetFocus(focusedWindow);
+}
+
 // Function to adjust the window size
 void AdjustWindowSize(HWND hwnd) {
     //std::cout << "AdjustWindowSize" << std::endl;
@@ -1405,10 +1602,10 @@ void AdjustWindowSize(HWND hwnd) {
     GetScrollInfo(hwnd, SB_VERT, &si); // Retrieve the scroll information of the window
     int screenHeight = GetSystemMetrics(SM_CYSCREEN); // Retrieve the screen height
     int titleBarHeight = GetSystemMetrics(SM_CYCAPTION); // Retrieve the title bar height
-    int usableScreenHeight = screenHeight - titleBarHeight - 25 - getTaskbarHeight(hwnd); // Calculate the usable screen height (minus 50px to not be straight up to the bottom of the screen)
+    int usableScreenHeight = screenHeight - titleBarHeight - 25 - getTaskbarHeight(hwnd) - heightToolbar; // Calculate the usable screen height (minus 50px to not be straight up to the bottom of the screen)
     int contentHeight = si.nMax + 30 + 40; // Calculate the content height
     int contentWidth = textWidth; // Set the content width
-    int newHeight = std::min(contentHeight, usableScreenHeight); // Calculate the new window height
+    int newHeight = std::max(200 + heightToolbar, std::min(contentHeight, usableScreenHeight)); // Calculate the new window height
 
     // Calculate the new y-position
     //int newYPos = yPos - (newHeight - height);
@@ -1424,12 +1621,10 @@ void AdjustWindowSize(HWND hwnd) {
         newHeight = screenHeight - yPos - getTaskbarHeight(hwnd);
     }
     //std::cout << previousHeight << " " << newHeight << std::endl;
-    if (previousHeight != newHeight) 
-    {
-        newHeight = std::max(newHeight, 100);
-        SetWindowPos(hwnd, NULL, xPos, yPos, contentWidth, newHeight, SWP_NOZORDER); // Setzen Sie die neue Fensterposition und -größe
+    if (previousHeight != newHeight) {
+        AnimateWindowResize(hwnd, xPos, yPos, contentWidth, newHeight);
         previousHeight = newHeight;
-    }   
+    }
 
     // Verwenden Sie die Standard-Y-Koordinate, wenn sie gesetzt ist
     /*if (defaultYPos != -1) {
@@ -1537,7 +1732,7 @@ HMENU CreateSelectScreenMenu(HMENU hMenu, bool forceRecreate = false) {
                                     std::to_wstring(height) + L")";
 
             if (monitor.rect == largestMonitor.rect) {
-                newHeight = static_cast<int>(newHeight * widthLargestMonitor / widthSecondLargestMonitor);
+                newHeight = widthSecondLargestMonitor != 0 ? static_cast<int>(newHeight * widthLargestMonitor / widthSecondLargestMonitor) : 1024;
             }
 
             // Verwenden Sie die HBITMAPs aus dem Cache
@@ -1572,8 +1767,8 @@ void InitializeMenu(HWND hwnd) {
 
     // Select menu
     //HMENU hSelectMenu = CreateMenu();
-    AppendMenu(hSelectMenu, MF_STRING, ID_SELECT_ALL, L"&Select All Windows\tCTRL+S");
-    AppendMenu(hSelectMenu, MF_STRING, ID_SELECT_NONE, L"&Un-select All Windows\tCTRL+U");
+    AppendMenu(hSelectMenu, MF_STRING, ID_SELECT_ALL, L"&Select All Window(s)\tCTRL+S");
+    AppendMenu(hSelectMenu, MF_STRING, ID_SELECT_NONE, L"&Un-select All Window(s)\tCTRL+U");
     //HMENU hSelectScreenMenu = CreateSelectScreenMenu(hSelectMenu);
     //AppendMenu(hSelectMenu, MF_POPUP, (UINT_PTR)hSelectScreenMenu, L"Select Screen(s)");
     AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hSelectMenu, L"Select / Un&-Select");
@@ -1716,7 +1911,7 @@ void SearchAndCheck(const std::wstring& searchString, HWND hwnd) {
     si.nPos = 0;
     SetScrollInfo(hwnd, SB_VERT, &si, TRUE); // Set the scroll information for the vertical scrollbar
     InvalidateRect(hwnd, NULL, TRUE); // Invalidate and redraw the window
-    AdjustWindowSize(hwnd); // Adjust the window size
+    //AdjustWindowSize(hwnd); // Adjust the window size
     InvalidateWindow(hwnd); // Invalidate and redraw the window
     //InvalidateRect(hwnd, NULL, TRUE);
 }
@@ -1934,6 +2129,71 @@ void setScrollToNewPos(HWND hwnd, bool up_down)
         SendScrollMessage(hwnd, SB_PAGEUP, 0);
 }
 
+// Toolbar erstellen
+HWND CreateSimpleToolbar(HWND hwndParent, HINSTANCE hInstance) {
+    //MessageBox(hwndParent, L"start", L"Error", MB_OK | MB_ICONERROR);
+    HWND focusedWindow = GetFocus(); // Ursprünglichen Fokus speichern
+    LoadIcons(hInstance);
+
+    if (!hImageList) {
+        //MessageBox(hwndParent, L"Failed to create image list!", L"Error", MB_OK | MB_ICONERROR);
+        return NULL;
+    }
+
+    if (!hIconMinimize || !hIconArrange || !hIconClose || !hIconAbout || !hIconExit || !hIconMaximize || !hIconMove || !hIconRefresh || !hIconRestore || !hIconSave || !hIconSelectAll || !hIconUnselectAll || !hIconSelectOnScreen) {
+        //MessageBox(hwndParent, L"Failed to load one or more icons!", L"Error", MB_OK | MB_ICONERROR);
+        return NULL;
+    }
+
+    TBBUTTON tbButtons[] = {
+        { MAKELONG(0, 0), IDI_ICON_EXIT, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"" },
+        { MAKELONG(1, 0), IDI_ICON_REFRESH, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"" },
+        { MAKELONG(2, 0), IDI_ICON_MINIMIZE, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"" },
+        { MAKELONG(3, 0), IDI_ICON_MAXIMIZE, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"" },
+        { MAKELONG(4, 0), IDI_ICON_RESTORE, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"" },
+        { MAKELONG(5, 0), IDI_ICON_ARRANGE, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"" },
+        { MAKELONG(6, 0), IDI_ICON_MOVE, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"" },
+        { MAKELONG(7, 0), IDI_ICON_SELECTALL, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"" },
+        { MAKELONG(8, 0), IDI_ICON_UNSELECTALL, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"" },
+        { MAKELONG(9, 0), IDI_ICON_SELECTONSCREEN, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"" },
+        { MAKELONG(10, 0), IDI_ICON_SAVE, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"" },
+        //{ MAKELONG(11, 0), IDI_ICON_CLOSE, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"" },
+        { MAKELONG(11, 0), IDI_ICON_ABOUT, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"" }
+    };
+
+    hwndToolbar = CreateToolbarEx(
+        hwndParent,
+        WS_CHILD | WS_VISIBLE | TBSTYLE_TOOLTIPS,
+        1,
+        12, // Anzahl der Bilder in der Image List
+        NULL,
+        0,
+        tbButtons,
+        ARRAYSIZE(tbButtons),
+        16, 16, 16, 16,
+        sizeof(TBBUTTON)
+    );
+
+    if (!hwndToolbar) {
+        //MessageBox(hwndParent, L"Failed to create toolbar!", L"Error", MB_OK | MB_ICONERROR);
+        return NULL;
+    }
+
+    SendMessage(hwndToolbar, TB_SETIMAGELIST, 0, (LPARAM)hImageList);
+
+    // Text für alle Buttons deaktivieren
+    /*for (int i = 0; i < ARRAYSIZE(tbButtons); ++i) {
+        TBBUTTONINFO tbInfo = { 0 };
+        tbInfo.cbSize = sizeof(TBBUTTONINFO);
+        tbInfo.dwMask = TBIF_TEXT;
+        tbInfo.pszText = L"";
+        SendMessage(hwndToolbar, TB_SETBUTTONINFO, tbButtons[i].idCommand, (LPARAM)&tbInfo);
+    }*/
+
+    SetFocus(focusedWindow);
+    return hwndToolbar;
+}
+
 LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     static std::vector<HWND> images;
 
@@ -1948,9 +2208,9 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_SWISS, L"Segoe UI");
 
             HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
-            static HICON hIconMinimize = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_MINIMIZE), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR | LR_LOADTRANSPARENT);
-            static HICON hIconArrange = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_ARRANGE), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR | LR_LOADTRANSPARENT);
-            static HICON hIconClose = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_CLOSE), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR | LR_LOADTRANSPARENT);
+            HICON hIconMinimize_contextmenu = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_MINIMIZE_contextmenu), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR | LR_LOADTRANSPARENT);
+            HICON hIconArrange_contextmenu = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_ARRANGE_contextmenu), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR | LR_LOADTRANSPARENT);
+            HICON hIconClose_contextmenu = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_ICON_CLOSE_contextmenu), IMAGE_ICON, 16, 16, LR_DEFAULTCOLOR | LR_LOADTRANSPARENT);
 
             int yPos = 10;
             int imageID = ID_IMAGE_START;
@@ -1998,9 +2258,9 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                     (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE),
                     NULL);
 
-                SendMessage(hImage1, STM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconMinimize);
-                SendMessage(hImage2, STM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconArrange);
-                SendMessage(hImage3, STM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconClose);
+                SendMessage(hImage1, STM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconMinimize_contextmenu);
+                SendMessage(hImage2, STM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconArrange_contextmenu);
+                SendMessage(hImage3, STM_SETIMAGE, IMAGE_ICON, (LPARAM)hIconClose_contextmenu);
 
                 images.push_back(hImage1);
                 images.push_back(hImage2);
@@ -2059,6 +2319,8 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
             SetTextColor(hdc, RGB(255, 255, 255)); // Weißer Text
             ReleaseDC(hExitButton, hdc);
           
+            //hwndToolbar = CreateSimpleToolbar(hwnd);
+
             break;
         }
 
@@ -2155,18 +2417,18 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
 
                 if (i == currentLine)
                 {
-                    RECT lineRect = {0, yPos - 5, rect.right, yPos - 5 + 30};
+                    RECT lineRect = {0, yPos - 10, rect.right, yPos - 10 + 30};
                     FillRect(memDC, &lineRect, (HBRUSH)GetStockObject(LTGRAY_BRUSH));
                 }
 
                 auto it = processIcons.find(processName);
                 if (it != processIcons.end())
                 {
-                    DrawIconEx(memDC, 10, yPos, it->second, 20, 20, 0, NULL, DI_NORMAL);
+                    DrawIconEx(memDC, 10, yPos - 5, it->second, 20, 20, 0, NULL, DI_NORMAL);
                 }
 
                 SetBkMode(memDC, TRANSPARENT);
-                TextOut(memDC, 40, yPos, processNameW.c_str(), processNameW.length());
+                TextOut(memDC, 40, yPos - 5, processNameW.c_str(), processNameW.length());
 
                 yPos += 30;
             }
@@ -2220,7 +2482,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                     for (auto& entry : processWindowsMap) {
                         for (auto& window : entry.second) {
                             if (window.processName == processNames[index]) {
-                                SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
+                                //SetWindowPos(window.hwnd, NULL, 0, 0, screenWidth, screenHeight, SWP_NOZORDER);
                                 window.arranged = false;
                                 ShowWindow(window.hwnd, SW_MINIMIZE);
                                 ProcessMessages();
@@ -2228,7 +2490,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                         }
                     }              
                 }
-            if (imageNumber == 2)
+            if (imageNumber == 2)  // arrange via context menu of tray icon
             {
                 int screenIndex = 0; 
                 std::vector<MonitorInfo> monitors;
@@ -2253,14 +2515,14 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 if (numWindows == 0) return 0;
         //std::cout << "numWindows: " << numWindows << std::endl;
                 int cols = static_cast<int>(ceil(sqrt(numWindows))); // Calculate the number of columns
-                int rows = (numWindows + cols - 1) / cols; // Calculate the number of rows
+                int rows = cols > 0 ? (numWindows + cols - 1) / cols : 1; // Calculate the number of rows
         //std::cout << "start0: " << std::endl;
         //std::cout << "screenWidth: " << screenWidth << std::endl;
         //std::cout << "cols: " << cols << std::endl;
         //std::cout << "screenHeight: " << screenHeight << std::endl;
         //std::cout << "rows: " << rows << std::endl;
-                int windowWidth = (screenWidth) / cols; // Calculate the window width
-                int windowHeight = (screenHeight) / rows; // Calculate the window height
+                int windowWidth = cols > 0 ? (screenWidth) / cols : 1; // Calculate the window width
+                int windowHeight = rows > 0 ? (screenHeight) / rows : 1; // Calculate the window height
         //std::cout << "start0a: " << std::endl;
                 int x = 0, y = 0; // Initialize the X and Y positions
                 int maxAdjustedWidth = 0;
@@ -2330,9 +2592,9 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 // Anzahl der Fenster nebeneinander und die Anzahl der Fensterreihen berechnen
                 cols = screenWidth / std::max(std::max(maxAdjustedWidth, screenWidth/cols), 1);
                 //std::cout << "cols: " << cols << std::endl;                
-                rows = (numWindows + cols - 1) / cols;
-                windowWidth = screenWidth / cols; // Calculate the window width
-                windowHeight = (screenHeight) / rows; // Calculate the window height
+                rows = cols > 0 ? (numWindows + cols - 1) / cols : 1;
+                windowWidth = cols > 0 ? screenWidth / cols : 1; // Calculate the window width
+                windowHeight = rows > 0 ? (screenHeight) / rows : 1; // Calculate the window height
 
                 // Fenster anordnen
                 x = 0;
@@ -2365,7 +2627,7 @@ LRESULT CALLBACK CustomMenuProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lPar
                 }*/
             }
 
-            if (imageNumber == 3)
+            if (imageNumber == 3) // save & close via context menu of tray icon
             {
                 HWND parentHwnd = GetParent(hwnd);
                 if (ConfirmClose(parentHwnd)) {
@@ -2449,6 +2711,13 @@ void UpdateControlPositions(HWND hwnd) {
     SetWindowPos(hSearchBox, NULL, searchBoxX, searchBoxY, searchBoxWidth, searchBoxHeight, SWP_NOZORDER);
     SetWindowPos(hEraseButton, NULL, searchBoxX - 15 - padding, searchBoxY, buttonWidth, buttonHeight, SWP_NOZORDER);
     SetWindowPos(hGoToButton, NULL, searchBoxX + searchBoxWidth + 0 * buttonWidth + 1 * padding, searchBoxY, buttonWidth, buttonHeight, SWP_NOZORDER);
+
+    InvalidateRect(hSearchBox, NULL, TRUE);
+    UpdateWindow(hSearchBox);
+    InvalidateRect(hEraseButton, NULL, TRUE);
+    UpdateWindow(hEraseButton);
+    InvalidateRect(hGoToButton, NULL, TRUE);
+    UpdateWindow(hGoToButton);
 }
 
 // Window procedure
@@ -2471,6 +2740,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 initialized = true;
                 MinimizeToTray(hwnd);
             }
+            
             RECT clientRect;
             GetClientRect(hwnd, &clientRect);
             int searchBoxWidth = 200; // Breite des Suchfelds
@@ -2550,6 +2820,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     processIcons[processName] = hIcon;
                 }
             }
+            hwndToolbar = CreateSimpleToolbar(hwnd, ((LPCREATESTRUCT)lParam)->hInstance);
+            if (!hwndToolbar) {
+                //MessageBox(hwnd, L"Failed to create toolbar!", L"Error", MB_OK | MB_ICONERROR);
+                //return -1; // Fenstererstellung abbrechen
+            }
+            else
+            {
+                //MessageBox(hwnd, L"success to create toolbar!", L"Error", MB_OK | MB_ICONERROR);
+            }
         }
         SetTimer(hwnd, BLINKING_TIMER_ID, 250, NULL);
         //InvalidateWindow(hwnd);
@@ -2557,8 +2836,17 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_KEYDOWN: {
             //std::cout << "WM_KEYDOWN" << std::endl;
-            switch (wParam)
+            if (windowReady)
             {
+                BYTE keyboardState[256];
+                GetKeyboardState(keyboardState);
+                WCHAR buffer[2];
+                wchar_t ch = 0;
+                if (ToUnicode(wParam, HIWORD(lParam) & 0xFF, keyboardState, buffer, 2, 0) == 1) {
+                    ch = buffer[0];
+                }
+                switch (wParam)
+                {
                 case VK_UP:
                 {
                     if (highlightedRow > 0 && highlightedRow <= processNames.size() &&
@@ -2568,14 +2856,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         highlightedRow--;
                     }
                     else if (highlightedRow == 0 &&
-                            !expandedState.at(processNames.at(highlightedRow)) &&
-                            highlightedWindowRow == -1)
+                        !expandedState.at(processNames.at(highlightedRow)) &&
+                        highlightedWindowRow == -1)
                     {
                         highlightedRow = 0;
                     }
-                    else if (highlightedRow > 0 && highlightedRow <= processNames.size() && 
-                            expandedState.at(processNames.at(highlightedRow - 1)) &&
-                            highlightedWindowRow == -1)
+                    else if (highlightedRow > 0 && highlightedRow <= processNames.size() &&
+                        expandedState.at(processNames.at(highlightedRow - 1)) &&
+                        highlightedWindowRow == -1)
                     {
                         highlightedWindowRow = (highlightedRow - 1) * 100000 + (processWindowsMap.at(processNames.at(highlightedRow - 1)).size() - 1);
                         for (auto counter = processWindowsMap.at(processNames.at(highlightedRow - 1)).size() - 1; counter >= 0; counter--)
@@ -2588,21 +2876,21 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         highlightedRow--;
                     }
                     else if (highlightedRow == 0 &&
-                            highlightedWindowRow == -1)
+                        highlightedWindowRow == -1)
                     {
                         highlightedRow = 0;
                     }
                     else if (highlightedRow == 0 && highlightedRow <= processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
-                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
-                            highlightedWindowRow >= highlightedRow * 100000)
+                        processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
+                        highlightedWindowRow >= highlightedRow * 100000)
                     {
                         int currentCounter = extractLastFiveDigits(highlightedWindowRow);
                         //std::cout << currentCounter << " " << highlightedWindowRow << std::endl;
-                        auto &windows = processWindowsMap.at(processNames.at(highlightedRow));
+                        auto& windows = processWindowsMap.at(processNames.at(highlightedRow));
                         int counter;
-                        for (counter = currentCounter-1; counter >= 0; counter--)
+                        for (counter = currentCounter - 1; counter >= 0; counter--)
                         {
-                            auto &window = windows.at(counter);
+                            auto& window = windows.at(counter);
                             //std::cout << counter << " " << window.visible << " " << window.checked << std::endl;
                             if (!window.visible && !window.checked)
                                 highlightedWindowRow--;
@@ -2611,7 +2899,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                                 break;
                             }
                         }
-                        if (counter < 0) 
+                        if (counter < 0)
                         {
                             highlightedWindowRow = -1;
                         }
@@ -2620,16 +2908,16 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         //std::cout << highlightedWindowRow << std::endl;
                     }
                     else if (highlightedRow > 0 && highlightedRow <= processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
-                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
-                            highlightedWindowRow >= highlightedRow * 100000)
+                        processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
+                        highlightedWindowRow >= highlightedRow * 100000)
                     {
                         int currentCounter = extractLastFiveDigits(highlightedWindowRow);
                         //std::cout << currentCounter << " " << highlightedWindowRow << std::endl;
-                        auto &windows = processWindowsMap.at(processNames.at(highlightedRow));
+                        auto& windows = processWindowsMap.at(processNames.at(highlightedRow));
                         int counter;
-                        for (counter = currentCounter-1; counter >= 0; counter--)
+                        for (counter = currentCounter - 1; counter >= 0; counter--)
                         {
-                            auto &window = windows.at(counter);
+                            auto& window = windows.at(counter);
                             //std::cout << counter << " " << window.visible << " " << window.checked << std::endl;
                             if (!window.visible && !window.checked)
                                 highlightedWindowRow--;
@@ -2638,7 +2926,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                                 break;
                             }
                         }
-                        if (counter < 0) 
+                        if (counter < 0)
                         {
                             highlightedWindowRow = -1;
                         }
@@ -2647,25 +2935,25 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         //std::cout << highlightedWindowRow << std::endl;
                     }
                     else if (expandedState.at(processNames.at(highlightedRow)) &&
-                            highlightedRow == 0 &&
-                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
-                            highlightedWindowRow == highlightedRow * 100000)
+                        highlightedRow == 0 &&
+                        processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
+                        highlightedWindowRow == highlightedRow * 100000)
                     {
                         highlightedWindowRow = -1;
                     }
                     else if (highlightedRow > 0 && highlightedRow <= processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
-                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
-                            highlightedWindowRow == highlightedRow * 100000)
+                        processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
+                        highlightedWindowRow == highlightedRow * 100000)
                     {
                         highlightedWindowRow = -1;
                     }
                     else if (highlightedRow == 0 && highlightedRow <= processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
-                            processWindowsMap.at(processNames.at(highlightedRow)).size() <= 1)
+                        processWindowsMap.at(processNames.at(highlightedRow)).size() <= 1)
                     {
                         highlightedWindowRow = -1;
                     }
                     else if (highlightedRow > 0 && highlightedRow <= processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
-                            processWindowsMap.at(processNames.at(highlightedRow)).size() <= 1)
+                        processWindowsMap.at(processNames.at(highlightedRow)).size() <= 1)
                     {
                         highlightedWindowRow = -1;
                     }
@@ -2701,21 +2989,21 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         highlightedRow++;
                     }
                     else if (highlightedRow == processNames.size() - 1 &&
-                            !expandedState.at(processNames.at(highlightedRow)) &&
-                            highlightedWindowRow == -1)
+                        !expandedState.at(processNames.at(highlightedRow)) &&
+                        highlightedWindowRow == -1)
                     {
                         //std::cout << "Case 2: highlightedRow set to " << highlightedRow << std::endl;
                         highlightedRow = processNames.size() - 1;
                     }
                     else if (highlightedRow >= 0 && highlightedRow < processNames.size() - 1 &&
-                            expandedState.at(processNames.at(highlightedRow)) &&
-                            highlightedWindowRow == -1)
+                        expandedState.at(processNames.at(highlightedRow)) &&
+                        highlightedWindowRow == -1)
                     {
                         highlightedWindowRow = (highlightedRow) * 100000;
                         //std::cout << "Case 3: highlightedWindowRow set to " << highlightedWindowRow << std::endl;
                         for (auto counter = 0; counter < processWindowsMap.at(processNames.at(highlightedRow)).size(); counter++)
                         {
-                            if (!processWindowsMap.at(processNames.at(highlightedRow)).at(counter).visible && 
+                            if (!processWindowsMap.at(processNames.at(highlightedRow)).at(counter).visible &&
                                 !processWindowsMap.at(processNames.at(highlightedRow)).at(counter).checked)
                                 highlightedWindowRow++;
                             else
@@ -2723,21 +3011,21 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         }
                     }
                     else if (highlightedRow == processNames.size() - 1 &&
-                            highlightedWindowRow == -1)
+                        highlightedWindowRow == -1)
                     {
                         //std::cout << "Case 4: highlightedRow set to " << highlightedRow << std::endl;
                         highlightedRow = processNames.size() - 1;
                     }
                     else if (highlightedRow >= 0 && highlightedRow < processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
-                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
-                            highlightedWindowRow >= highlightedRow * 100000)
+                        processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
+                        highlightedWindowRow >= highlightedRow * 100000)
                     {
                         int currentCounter = extractLastFiveDigits(highlightedWindowRow);
-                        auto &windows = processWindowsMap.at(processNames.at(highlightedRow));
+                        auto& windows = processWindowsMap.at(processNames.at(highlightedRow));
                         int counter;
                         for (counter = currentCounter + 1; counter < windows.size(); counter++)
                         {
-                            auto &window = windows.at(counter);
+                            auto& window = windows.at(counter);
                             //std::cout << counter << " " << window.visible << " " << window.checked << std::endl;
                             if (!window.visible && !window.checked)
                                 highlightedWindowRow++;
@@ -2759,29 +3047,29 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         }
                     }
                     else if (expandedState.at(processNames.at(highlightedRow)) &&
-                            highlightedRow == processNames.size() - 1 &&
-                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
-                            highlightedWindowRow == (highlightedRow + 1) * 100000)
+                        highlightedRow == processNames.size() - 1 &&
+                        processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
+                        highlightedWindowRow == (highlightedRow + 1) * 100000)
                     {
                         highlightedWindowRow = -1;
                         //std::cout << "Case 6: highlightedWindowRow set to -1" << std::endl;
                     }
                     else if (highlightedRow >= 0 && highlightedRow < processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
-                            processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
-                            highlightedWindowRow == highlightedRow * 100000)
+                        processWindowsMap.at(processNames.at(highlightedRow)).size() > 1 &&
+                        highlightedWindowRow == highlightedRow * 100000)
                     {
                         highlightedWindowRow = -1;
                         //std::cout << "Case 7: highlightedWindowRow set to -1" << std::endl;
                     }
                     else if (highlightedRow == processNames.size() - 1 && expandedState.at(processNames.at(highlightedRow)) &&
-                            processWindowsMap.at(processNames.at(highlightedRow)).size() <= 1)
+                        processWindowsMap.at(processNames.at(highlightedRow)).size() <= 1)
                     {
                         highlightedWindowRow = -1;
                         highlightedRow++;
                         //std::cout << "Case 8: highlightedWindowRow set to -1" << std::endl;
                     }
                     else if (highlightedRow >= 0 && highlightedRow < processNames.size() && expandedState.at(processNames.at(highlightedRow)) &&
-                            processWindowsMap.at(processNames.at(highlightedRow)).size() <= 1)
+                        processWindowsMap.at(processNames.at(highlightedRow)).size() <= 1)
                     {
                         highlightedWindowRow = -1;
                         highlightedRow++;
@@ -2817,14 +3105,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     {
                         std::wstring key = std::to_wstring(highlightedRow);
                         //std::wcout << L"Highlighted window row is not -1. Key: " << key << std::endl;
-                        const auto &processName = processNames[highlightedRow];
+                        const auto& processName = processNames[highlightedRow];
                         checkboxState[processName] = !checkboxState[processName];
                         //std::wcout << L"Checkbox state for key " << key << L" is now " << checkboxState[processName] << std::endl;
-                        
+
                         std::wstring processKey = std::to_wstring(extractLastFiveDigits(highlightedWindowRow));
                         //std::wcout << L"Process key: " << processKey << std::endl;
                         int counter = 0;
-                        for (auto &window : processWindowsMap[processName])
+                        for (auto& window : processWindowsMap[processName])
                         {//std::cout << "counter: " << counter << "  extractLastFiveDigits(highlightedWindowRow): " << extractLastFiveDigits(highlightedWindowRow) << std::endl;
                             if (counter == extractLastFiveDigits(highlightedWindowRow))
                             {//std::cout << "match" << std::endl;
@@ -2839,11 +3127,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     {
                         std::wstring key = std::to_wstring(highlightedRow);
                         //std::wcout << L"Highlighted window row is -1. Key: " << key << std::endl;
-                        const auto &processName = processNames[highlightedRow];
+                        const auto& processName = processNames[highlightedRow];
                         checkboxState[processName] = !checkboxState[processName];
                         //std::wcout << L"Checkbox state for key " << key << L" is now " << checkboxState[processName] << std::endl;
-                        
-                        for (auto &window : processWindowsMap[processName])
+
+                        for (auto& window : processWindowsMap[processName])
                         {
                             window.checked = checkboxState[processName];
                             window.visible = true;
@@ -2907,10 +3195,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 {
                     std::wstring key = std::to_wstring(highlightedRow);
                     //std::wcout << L"Highlighted window row is -1. Key: " << key << std::endl;
-                    const auto &processName = processNames[highlightedRow];
+                    const auto& processName = processNames[highlightedRow];
                     expandedState[processName] = 1;
                     //std::wcout << L"Checkbox state for key " << key << L" is now " << checkboxState[processName] << std::endl;
-                    for (auto &window : processWindowsMap[processName])
+                    for (auto& window : processWindowsMap[processName])
                     {
                         window.visible = true;
                         //std::wcout << L"Set window.checked to " << checkboxState[processName] << L" for window in processWindowsMap with key " << key << std::endl;
@@ -2922,10 +3210,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 {
                     std::wstring key = std::to_wstring(highlightedRow);
                     //std::wcout << L"Highlighted window row is -1. Key: " << key << std::endl;
-                    const auto &processName = processNames[highlightedRow];
+                    const auto& processName = processNames[highlightedRow];
                     expandedState[processName] = 0;
                     //std::wcout << L"Checkbox state for key " << key << L" is now " << checkboxState[processName] << std::endl;
-                    for (auto &window : processWindowsMap[processName])
+                    for (auto& window : processWindowsMap[processName])
                     {
                         window.visible = false;
                         //std::wcout << L"Set window.checked to " << checkboxState[processName] << L" for window in processWindowsMap with key " << key << std::endl;
@@ -2933,89 +3221,91 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     InvalidateWindow(hwnd);
                 }
                 break;
-            }
-            if (((wParam == 'F') || (wParam == 'A')) && (GetKeyState(VK_CONTROL) & 0x8000))
-            {
-                // Ctrl+F was pressed
-                SetFocus(hSearchBox);
-                SendMessage(hSearchBox, EM_SETSEL, 0, -1); // Select all text in the search box
-                return 0;
-                /*} else if (wParam == VK_ESCAPE) {
-                    // ESC key was pressed
-                    wParam = IDC_ERASEBUTTON;*/
-            }
-            /*else if ((wParam == 'X') && (GetKeyState(VK_CONTROL) & 0x8000)) {
-                // Handle the hotkey (CTRL+X)
-                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_X, 0), 0);
-                /*SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-                //int result = MessageBox(NULL, L"Are you sure you want to exit the 'Many Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST);
-                int result = ShowMessageBoxAndHandleTimers(NULL, L"Are you sure you want to exit the 'Many Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST, timers);
-
-                if (result == IDYES)
-                {
-                    PostQuitMessage(0);
                 }
-                else
+
+                if (((wParam == 'F') || (wParam == 'A')) && (GetKeyState(VK_CONTROL) & 0x8000))
                 {
-                    SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-                }*/
-            //}
-            else if ((wParam == 'W') && (GetKeyState(VK_CONTROL) & 0x8000))
-            {
-                // Handle the hotkey (CTRL+W) (close to tray)
-                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_W, 0), 0);
-            }
-            else if ((wParam == 'I') && (GetKeyState(VK_CONTROL) & 0x8000))
-            {
-                // Handle the hotkey (CTRL+I) (minimize windows)
-                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_I, 0), 0);
-            }
-            else if ((wParam == 'X') && (GetKeyState(VK_CONTROL) & 0x8000))
-            {
-                // Handle the hotkey (CTRL+X) (maximize windows)
-                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_X, 0), 0);
-            }
-            else if ((wParam == 'A') && (GetKeyState(VK_CONTROL) & 0x8000))
-            {
-                // Handle the hotkey (CTRL+A) (erase search field)
-                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_A, 0), 0);
-            }
-            else if ((wParam == 'Q') && (GetKeyState(VK_CONTROL) & 0x8000))
-            {
-                // Handle the hotkey (CTRL+Q) (Quit = Exit)
-                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_Q, 0), 0);
-            }
-            else if ((wParam == 'R') && (GetKeyState(VK_CONTROL) & 0x8000))
-            {
-                // Handle the hotkey (CTRL+R) (restore windows)
-                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_R, 0), 0);
-            }
-            else if ((wParam == 'N') && (GetKeyState(VK_CONTROL) & 0x8000))
-            {
-                // Handle the hotkey (CTRL+N) (arrange windows)
-                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_N, 0), 0);
-            }
-            else if ((wParam == 'M') && (GetKeyState(VK_CONTROL) & 0x8000))
-            {
-                // Handle the hotkey (CTRL+M) (move windows)
-                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_M, 0), 0);
-            }
-            else if ((wParam == 'S') && (GetKeyState(VK_CONTROL) & 0x8000))
-            {
-                // Handle the hotkey (CTRL+S) (select all)
-                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_SELECT_ALL, 0), 0);
-            }
-            else if ((wParam == 'U') && (GetKeyState(VK_CONTROL) & 0x8000))
-            {
-                // Handle the hotkey (CTRL+U) (un-select all)
-                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_SELECT_NONE, 0), 0);
-            }
-            else if ((wParam == 'M') && (GetKeyState(VK_CONTROL) & 0x8000) && (GetKeyState(VK_SHIFT) & 0x8000))
-            {
-                // Handle the hotkey (CTRL+SHIFT+M) (refresh list)
-                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_REFRESH, 0), 0);
-            }
-            else if ((wParam != VK_UP && wParam != VK_DOWN && IsValidInput(reinterpret_cast<const wchar_t *>(&wParam))) || wParam == VK_BACK || wParam == VK_TAB)
+                    // Ctrl+F was pressed
+                    SetFocus(hSearchBox);
+                    SendMessage(hSearchBox, EM_SETSEL, 0, -1); // Select all text in the search box
+                    return 0;
+                    /*} else if (wParam == VK_ESCAPE) {
+                        // ESC key was pressed
+                        wParam = IDC_ERASEBUTTON;*/
+                }
+                /*else if ((wParam == 'X') && (GetKeyState(VK_CONTROL) & 0x8000)) {
+                    // Handle the hotkey (CTRL+X)
+                    SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_X, 0), 0);
+                    /*SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                    //int result = MessageBox(NULL, L"Are you sure you want to exit the 'Many Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST);
+                    int result = ShowMessageBoxAndHandleTimers(NULL, L"Are you sure you want to exit the 'Many Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST, timers);
+
+                    if (result == IDYES)
+                    {
+                        PostQuitMessage(0);
+                    }
+                    else
+                    {
+                        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+                    }*/
+                //}
+                else if ((wParam == 'W') && (GetKeyState(VK_CONTROL) & 0x8000))
+                {
+                    // Handle the hotkey (CTRL+W) (close to tray)
+                    SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_W, 0), 0);
+                }
+                else if ((wParam == 'I') && (GetKeyState(VK_CONTROL) & 0x8000))
+                {
+                    // Handle the hotkey (CTRL+I) (minimize windows)
+                    SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_I, 0), 0);
+                }
+                else if ((wParam == 'X') && (GetKeyState(VK_CONTROL) & 0x8000))
+                {
+                    // Handle the hotkey (CTRL+X) (maximize windows)
+                    SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_X, 0), 0);
+                }
+                else if (((wParam == 'A') && (GetKeyState(VK_CONTROL) & 0x8000)) ||
+                    ((wParam == VK_HOME) && (GetKeyState(VK_SHIFT) & 0x8000)))
+                {
+                    // Handle the hotkey (CTRL+A or SHIFT+HOME) (erase search field)
+                    SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_A, 0), 0);
+                }
+                else if ((wParam == 'Q') && (GetKeyState(VK_CONTROL) & 0x8000))
+                {
+                    // Handle the hotkey (CTRL+Q) (Quit = Exit)
+                    SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_Q, 0), 0);
+                }
+                else if ((wParam == 'R') && (GetKeyState(VK_CONTROL) & 0x8000))
+                {
+                    // Handle the hotkey (CTRL+R) (restore windows)
+                    SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_R, 0), 0);
+                }
+                else if ((wParam == 'N') && (GetKeyState(VK_CONTROL) & 0x8000))
+                {
+                    // Handle the hotkey (CTRL+N) (arrange windows)
+                    SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_N, 0), 0);
+                }
+                else if ((wParam == 'M') && (GetKeyState(VK_CONTROL) & 0x8000))
+                {
+                    // Handle the hotkey (CTRL+M) (move windows)
+                    SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_CTRL_M, 0), 0);
+                }
+                else if ((wParam == 'S') && (GetKeyState(VK_CONTROL) & 0x8000))
+                {
+                    // Handle the hotkey (CTRL+S) (select all)
+                    SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_SELECT_ALL, 0), 0);
+                }
+                else if ((wParam == 'U') && (GetKeyState(VK_CONTROL) & 0x8000))
+                {
+                    // Handle the hotkey (CTRL+U) (un-select all)
+                    SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_SELECT_NONE, 0), 0);
+                }
+                else if ((wParam == 'M') && (GetKeyState(VK_CONTROL) & 0x8000) && (GetKeyState(VK_SHIFT) & 0x8000))
+                {
+                    // Handle the hotkey (CTRL+SHIFT+M) (refresh list)
+                    SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(ID_REFRESH, 0), 0);
+                }
+                else if ((wParam != VK_UP && wParam != VK_DOWN && IsValidInput(&ch)) || wParam == VK_BACK || wParam == VK_TAB)
             {
                 HWND hFocusedWindow = GetFocus();
                 //std::cout << wParam << std::endl;
@@ -3083,6 +3373,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
                 SetFocus(hwnd);
                 return 0;
+            }
             }
         }
         break;
@@ -3213,6 +3504,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     SetWindowText(hSearchBox, L"\u2315 Search Name (CTRL-F)"); // Setzen Sie hier Ihren Such-Hint-Text ein
                 }
                 SetFocus(hwnd);
+                MinimizeToTray(hwnd);
             }
             if (id == IDC_ERASEBUTTON) {
                 SetWindowText(hSearchBox, L"");
@@ -3223,7 +3515,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 InvalidateRect(hEraseButton, NULL, TRUE);
                 UpdateWindow(hEraseButton);
                 if (GetWindowTextLength(hSearchBox) == 0) {
-                    SetWindowText(hSearchBox, L"\u2315 Search Name (CTRL-F)"); // Setzen Sie hier Ihren Such-Hint-Text ein
+                    SetWindowText(hSearchBox, L"\u2315 Search Name (CTRL-F)"); 
                 }
                 SetFocus(hwnd);
             }
@@ -3254,9 +3546,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }*/
             }
             // Check if the command ID is one of the specified IDs
-            if (id == ID_MINIMIZE || id == ID_MAXIMIZE || id == ID_RESTORE || id == ID_CLOSE || 
-                (id >= ID_ARRANGE && id <= ID_ARRANGE + screenCount) || 
-                (id >= ID_MOVE_TO_SCREEN_BASE && id <= ID_MOVE_TO_SCREEN_BASE + screenCount) || id == ID_SAVEANDCLOSE) {
+            if (   id == ID_MINIMIZE || id == IDI_ICON_MINIMIZE
+                || id == ID_MAXIMIZE || id == IDI_ICON_MAXIMIZE
+                || id == ID_RESTORE  || id == IDI_ICON_RESTORE
+                || id == ID_CLOSE    || id == IDI_ICON_CLOSE
+                || (id >= ID_ARRANGE && id <= ID_ARRANGE + screenCount) 
+                || (id >= ID_MOVE_TO_SCREEN_BASE && id <= ID_MOVE_TO_SCREEN_BASE + screenCount) 
+                || id == ID_SAVEANDCLOSE || id == IDI_ICON_SAVE
+                ) {
 
                 // Check if at least one window is checked
                 bool isChecked = false;
@@ -3284,7 +3581,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 
             }
 
-            if (id == ID_MINIMIZE || LOWORD(wParam) == ID_CTRL_I) { // Check if the ID is 2000 (Minimize)
+            if (id == ID_MINIMIZE || LOWORD(wParam) == ID_CTRL_I || LOWORD(wParam) == IDI_ICON_MINIMIZE) { // Check if the ID is 2000 (Minimize)
                 MinimizeToTray(hwnd); // Minimize the window to the tray
                 int screenWidth = GetSystemMetrics(SM_CXSCREEN);
                 int screenHeight = GetSystemMetrics(SM_CYSCREEN);
@@ -3318,7 +3615,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 //InvalidateWindow(hwnd);
                 Sleep(100); // Short pause
                 actionOnGoing = false;
-            } else if (id == ID_MAXIMIZE || LOWORD(wParam) == ID_CTRL_X) { // Check if the ID is 2000 (Minimize)
+            } else if (id == ID_MAXIMIZE || LOWORD(wParam) == ID_CTRL_X || LOWORD(wParam) == IDI_ICON_MAXIMIZE) { // Check if the ID is 2000 (Minimize)
                 MinimizeToTray(hwnd); // Minimize the window to the tray
                 int screenWidth = GetSystemMetrics(SM_CXSCREEN);
                 int screenHeight = GetSystemMetrics(SM_CYSCREEN);
@@ -3351,7 +3648,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 //InvalidateWindow(hwnd);
                 Sleep(100); // Short pause
                 actionOnGoing = false;
-            } else if (id == ID_RESTORE || LOWORD(wParam) == ID_CTRL_R) { // Check if the ID is 2001 (Restore)
+            } else if (id == ID_RESTORE || LOWORD(wParam) == ID_CTRL_R || LOWORD(wParam) == IDI_ICON_RESTORE) { // Check if the ID is 2001 (Restore)
                 MinimizeToTray(hwnd); // Minimize the window to the tray
                 for (const auto& entry : processWindowsMap) { // Iterate through all processes
                     for (const auto& window : entry.second) { // Iterate through all windows of a process
@@ -3419,7 +3716,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     Sleep(100); // Short pause
                 }
                 actionOnGoing = false;
-            } else if (id == ID_EXIT_BUTTON || LOWORD(wParam) == ID_CTRL_Q) {
+            } else if (id == ID_EXIT_BUTTON || LOWORD(wParam) == ID_CTRL_Q || LOWORD(wParam) == IDI_ICON_EXIT) {
                 SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
                 //int result = MessageBox(NULL, L"Are you sure you want to exit the 'Many Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST);
                 int result = ShowMessageBoxAndHandleTimers(NULL, L"Are you sure you want to exit the 'Many Open Windows' program?", L"Exit Confirmation", MB_YESNO | MB_ICONQUESTION  | MB_TOPMOST, timers);
@@ -3433,10 +3730,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
                 }
                 actionOnGoing = false;
-            } else if (id == ID_CLOSE_PROGRAMM || LOWORD(wParam) == ID_CTRL_W) {
+            } else if (id == ID_CLOSE_PROGRAMM || LOWORD(wParam) == ID_CTRL_W || LOWORD(wParam) == IDI_ICON_CLOSE) {
                     MinimizeToTray(hwnd); // Minimize the window to the tray
                     actionOnGoing = false;
-            } else if (id == ID_SAVEANDCLOSE) { // Check if the ID is SAVEANDCLOSE
+            } else if (id == ID_SAVEANDCLOSE || LOWORD(wParam) == IDI_ICON_SAVE) { // Check if the ID is SAVEANDCLOSE
                 if (ConfirmClose(hwnd)) { // Display confirmation dialog
                     ProcessMessages(); // Process messages
                     MinimizeToTray(hwnd); // Minimize the window to the tray
@@ -3527,14 +3824,14 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     Sleep(100); // Short pause
                 }
                 actionOnGoing = false;
-            } else if ((id >= ID_ARRANGE && id <= ID_ARRANGE + screenCount) || LOWORD(wParam) == ID_CTRL_N) {//else if (id == 2003) { Check if the ID is 2003 (Arrange)
+            } else if ((id >= ID_ARRANGE && id <= ID_ARRANGE + screenCount) || LOWORD(wParam) == ID_CTRL_N || LOWORD(wParam) == IDI_ICON_ARRANGE) {//else if (id == 2003) { Check if the ID is 2003 (Arrange)
                 //std::cout << "arrange" << std::endl;
                 MinimizeToTray(hwnd); // Minimize the window to the tray
                 //MessageBoxW(hwnd, L"aha2", L"Debug Info", MB_OK);
                 ClearTemporaryTiles();
                 //std::thread([hwnd, id]() {
                     int screenIndex = 0;
-                    if (id != ID_CTRL_N) 
+                    if (id != ID_CTRL_N && id != IDI_ICON_ARRANGE)
                         screenIndex = (id - ID_ARRANGE);
                     else
                     {
@@ -3566,10 +3863,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     }
                     if (numWindows == 0) return 0;
                     int cols = static_cast<int>(ceil(sqrt(numWindows))); // Calculate the number of columns
-                    int rows = (numWindows + cols - 1) / cols; // Calculate the number of rows
+                    int rows = cols > 0 ? (numWindows + cols - 1) / cols : 1; // Calculate the number of rows
 
-                    int windowWidth = (screenWidth) / cols; // Calculate the window width
-                    int windowHeight = (screenHeight) / rows; // Calculate the window height
+                    int windowWidth = cols > 0 ? (screenWidth) / cols : 1; // Calculate the window width
+                    int windowHeight = rows > 0 ? (screenHeight) / rows : 1; // Calculate the window height
 
                     int x = 0, y = 0; // Initialize the X and Y positions
                     int maxAdjustedWidth = 0;
@@ -3638,11 +3935,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     cols = screenWidth / std::max(std::max(maxAdjustedWidth, screenWidth/cols), 1);
                                     //std::cout << cols << std::endl;
                     //std::cout << "cols: " << cols << std::endl;                
-                    rows = (numWindows + cols - 1) / cols;
+                    rows = cols > 0 ? (numWindows + cols - 1) / cols : 1;
                                     //std::cout << rows << std::endl;
-                    windowWidth = screenWidth / cols; // Calculate the window width
+                    windowWidth = cols > 0 ? screenWidth / cols : 1; // Calculate the window width
                     //std::cout << windowWidth << std::endl;
-                    windowHeight = (screenHeight) / rows; // Calculate the window height
+                    windowHeight = rows > 0 ? (screenHeight) / rows : 1; // Calculate the window height
                     //std::cout << windowHeight << std::endl;
                     // Fenster anordnen
                     x = 0;
@@ -3684,7 +3981,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             } else if (id == ID_TRAY_EXIT) { // Check if the ID is for tray exit
                 actionOnGoing = false;
                 PostQuitMessage(0); // Quit the application
-            } else if (id >= ID_SELECT_SCREEN_BASE && id <= ID_SELECT_SCREEN_BASE + screenCount) {
+            } else if ((id >= ID_SELECT_SCREEN_BASE && id <= ID_SELECT_SCREEN_BASE + screenCount) || (id == IDI_ICON_SELECTONSCREEN)) {
                 std::vector<MonitorInfo> monitors;
                 //std::cout << "Initializing monitor enumeration..." << std::endl;
 
@@ -3693,6 +3990,15 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     std::cerr << "EnumDisplayMonitors failed with error: " << GetLastError() << std::endl;
                 } else {
                     //std::cout << "EnumDisplayMonitors succeeded." << std::endl;
+                }
+
+                if (id == IDI_ICON_SELECTONSCREEN)
+                {
+                    int screenIndex = 0;
+                    globalScreenIndexChosen++;
+                    if (globalScreenIndexChosen > monitors.size()) globalScreenIndexChosen = 1;
+                    if (monitors.size() > 1) screenIndex = globalScreenIndexChosen - 1;
+                    id = screenIndex + ID_SELECT_SCREEN_BASE;
                 }
 
                 //std::cout << "Number of monitors found: " << monitors.size() << std::endl;
@@ -3741,11 +4047,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     //std::cout << "Invalidated rect for process: " << processName << std::endl;
                 
                 actionOnGoing = false;
-            } else if ((id >= ID_MOVE_TO_SCREEN_BASE && id <= ID_MOVE_TO_SCREEN_BASE + screenCount) || LOWORD(wParam) == ID_CTRL_M) { // Check if the ID is 2004ff (Move to Screen x)
+            } else if ((id >= ID_MOVE_TO_SCREEN_BASE && id <= ID_MOVE_TO_SCREEN_BASE + screenCount) || LOWORD(wParam) == ID_CTRL_M || LOWORD(wParam) == IDI_ICON_MOVE) { // Check if the ID is 2004ff (Move to Screen x)
                 MinimizeToTray(hwnd); // Minimize the window to the tray
                 ClearTemporaryTiles();
                 int screenIndex = 0;
-                if (id != ID_CTRL_M) 
+                if (id != ID_CTRL_M && id != IDI_ICON_MOVE)
                     screenIndex = (id - ID_MOVE_TO_SCREEN_BASE);
                 else
                 {
@@ -3843,7 +4149,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     //SetWindowText(hSearchBox, L"");
                 }
                 actionOnGoing = false;
-            } else if (id == ID_REFRESH || LOWORD(wParam) == ID_CTRL_F) {
+            } else if (id == ID_REFRESH || LOWORD(wParam) == ID_CTRL_F || LOWORD(wParam) == IDI_ICON_REFRESH) {
                 RefreshWindowList(hwnd);
                 SetForegroundWindow(hwnd);
                 SetFocus(hwnd);
@@ -3866,7 +4172,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 SetFocus(hSearchBox);
                 SendMessage(hSearchBox, EM_SETSEL, 0, -1); // Select all text in the search box
                 actionOnGoing = false;
-            } else if (LOWORD(wParam) == ID_SELECT_ALL || LOWORD(wParam) == ID_CTRL_S) {
+            } else if (LOWORD(wParam) == ID_SELECT_ALL || LOWORD(wParam) == ID_CTRL_S || LOWORD(wParam) == IDI_ICON_SELECTALL) {
                 // Ctrl+S was pressed
                 for (size_t i = 0; i < processNames.size(); ++i)
                 {
@@ -3879,7 +4185,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     InvalidateRect(hwnd, NULL, TRUE);
                 }
                 actionOnGoing = false;
-            } else if (LOWORD(wParam) == ID_SELECT_NONE || LOWORD(wParam) == ID_CTRL_U) {
+            } else if (LOWORD(wParam) == ID_SELECT_NONE || LOWORD(wParam) == ID_CTRL_U || LOWORD(wParam) == IDI_ICON_UNSELECTALL) {
                 // Ctrl+U was pressed
                 for (size_t i = 0; i < processNames.size(); ++i)
                 {
@@ -3893,12 +4199,46 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 }
                 actionOnGoing = false;
             }
-            if (LOWORD(wParam) == ID_ABOUT) {
-                MessageBox(hwnd,
-                    L"MoW - Many Open Windows\n\n"
+            if (LOWORD(wParam) == ID_ABOUT || LOWORD(wParam) == IDI_ICON_ABOUT) {
+                // Datum der letzten Kompilierung abrufen
+                std::string compileDate = __DATE__;
+                std::string compileTime = __TIME__;
+
+                // Datum der letzten Kompilierung formatieren
+                std::istringstream dateStream(compileDate);
+                std::string monthStr, dayStr, yearStr;
+                dateStream >> monthStr >> dayStr >> yearStr;
+
+                // Monat in numerisches Format umwandeln
+                int month = 0;
+                if (monthStr == "Jan") month = 1;
+                else if (monthStr == "Feb") month = 2;
+                else if (monthStr == "Mar") month = 3;
+                else if (monthStr == "Apr") month = 4;
+                else if (monthStr == "May") month = 5;
+                else if (monthStr == "Jun") month = 6;
+                else if (monthStr == "Jul") month = 7;
+                else if (monthStr == "Aug") month = 8;
+                else if (monthStr == "Sep") month = 9;
+                else if (monthStr == "Oct") month = 10;
+                else if (monthStr == "Nov") month = 11;
+                else if (monthStr == "Dec") month = 12;
+
+                // Versionsnummer formatieren
+                std::ostringstream version;
+                version << "v1."
+                    << std::setw(2) << std::setfill('0') << month << "."
+                    << std::setw(2) << std::setfill('0') << std::stoi(dayStr)
+                    << std::setw(2) << std::setfill('0') << std::stoi(yearStr.substr(2, 2));
+
+                std::wstring versionW = stringToWString(version.str());
+                //MessageBoxW(hwnd, versionW.c_str(), L"Info", MB_OK | MB_ICONINFORMATION);
+                
+                // Nachricht anzeigen
+                std::wstring message = L"MoW - Many Open Windows\n\n"
                     L"Thanks for using this tool,\nand we hope it helps you a lot\n"
                     L"to be more productive.\n\n"
-                    L"Shortcuts:\n"
+                    L"Shortcuts:\n\n"
                     L"CTRL+SHIFT+M:\tShow program window, reload, refresh list\n"
                     L"CTRL+I:\t\tMinimize Window(s)\n"
                     L"CTRL+X:\t\tMaximize Window(s)\n"
@@ -3910,9 +4250,9 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     L"CTRL+F:\t\tFind\n"
                     L"CTRL+W:\t\tClose Program to Tray\n"
                     L"CTRL+Q:\t\tExit Program\n\n\n"
-                    L"v1.02.1225",
-                    L"About",
-                    MB_OK);
+                    + std::wstring(version.str().begin(), version.str().end());
+
+                MessageBox(hwnd, message.c_str(), L"About", MB_OK);
             }
             
         }
@@ -3928,7 +4268,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             POINT pt; // Declaration of a POINT structure to store the cursor position
             GetCursorPos(&pt); // Retrieve the current cursor position
             ScreenToClient(hwnd, &pt); // Convert screen coordinates to client coordinates
-            int yPos = 0 - scrollPos; // Initialize the y-position based on the scroll position
+            int yPos = 0 - scrollPos + heightToolbar; // Initialize the y-position based on the scroll position
             //bool found = false; // Flag to check if an item was found
             HFONT hFont = CreateFont(24, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, TEXT("Segoe UI")); // Create a font
             HDC hdc = GetDC(hwnd); // Retrieve the device context
@@ -4055,91 +4395,94 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
         case WM_MOUSEMOVE: { // Message when the mouse is moved
             //std::cout << "WM_MOUSEMOVE" << std::endl;
-            if (isScrolling) { // Check if scrolling
-                POINT currentMousePos; // Variable to store the current mouse position
-                currentMousePos.x = GET_X_LPARAM(lParam); // Retrieve the X position of the mouse
-                currentMousePos.y = GET_Y_LPARAM(lParam); // Retrieve the Y position of the mouse
 
-                int deltaY = currentMousePos.y - lastMousePos.y; // Calculate the Y displacement
+                if (isScrolling) { // Check if scrolling
+                    POINT currentMousePos; // Variable to store the current mouse position
+                    currentMousePos.x = GET_X_LPARAM(lParam); // Retrieve the X position of the mouse
+                    currentMousePos.y = GET_Y_LPARAM(lParam); // Retrieve the Y position of the mouse
 
-                // Scroll the window
-                SCROLLINFO si = {}; // Initialize a SCROLLINFO structure
-                si.cbSize = sizeof(si); // Set the size of the structure
-                si.fMask = SIF_ALL; // Specify that all information is set
-                GetScrollInfo(hwnd, SB_VERT, &si); // Retrieve the current scroll information
-                int yPos = si.nPos - deltaY; // Calculate the new Y position
+                    int deltaY = currentMousePos.y - lastMousePos.y; // Calculate the Y displacement
 
-                // Limit the Y position
-                yPos = std::max(0, std::min(yPos, si.nMax - (int)si.nPage + 1));
-                if (yPos != si.nPos) { // Check if the position has changed
-                    si.fMask = SIF_POS; // Specify that the position is set
-                    si.nPos = yPos; // Set the new position
-                    SetScrollInfo(hwnd, SB_VERT, &si, TRUE); // Set the scroll info
-                    RECT scrollRect;
-                    GetClientRect(hwnd, &scrollRect);
-                    //scrollRect.bottom -= 55; // Area without white bar
-                    ScrollWindowEx(hwnd, 0, deltaY, &scrollRect, &scrollRect, NULL, NULL, SW_INVALIDATE | SW_ERASE); 
-                    InvalidateRect(hwnd, &scrollRect, TRUE); // Invalidate and redraw the rectangle
+                    // Scroll the window
+                    SCROLLINFO si = {}; // Initialize a SCROLLINFO structure
+                    si.cbSize = sizeof(si); // Set the size of the structure
+                    si.fMask = SIF_ALL; // Specify that all information is set
+                    GetScrollInfo(hwnd, SB_VERT, &si); // Retrieve the current scroll information
+                    int yPos = si.nPos - deltaY; // Calculate the new Y position
+
+                    // Limit the Y position
+                    yPos = std::max(0, std::min(yPos, si.nMax - (int)si.nPage + 1));
+                    if (yPos != si.nPos) { // Check if the position has changed
+                        si.fMask = SIF_POS; // Specify that the position is set
+                        si.nPos = yPos; // Set the new position
+                        SetScrollInfo(hwnd, SB_VERT, &si, TRUE); // Set the scroll info
+                        RECT scrollRect;
+                        GetClientRect(hwnd, &scrollRect);
+                        //scrollRect.bottom -= 55; // Area without white bar
+                        ScrollWindowEx(hwnd, 0, deltaY, &scrollRect, &scrollRect, NULL, NULL, SW_INVALIDATE | SW_ERASE);
+                        InvalidateRect(hwnd, &scrollRect, TRUE); // Invalidate and redraw the rectangle
+                    }
+                    InvalidateRect(hwnd, NULL, TRUE); // Invalidate and redraw the rectangle
+                    lastMousePos = currentMousePos; // Update the last mouse position
                 }
-                InvalidateRect(hwnd, NULL, TRUE); // Invalidate and redraw the rectangle
-                lastMousePos = currentMousePos; // Update the last mouse position
-            } else {
-                POINT pt; 
-                GetCursorPos(&pt); 
+                else {
+                    POINT pt;
+                    GetCursorPos(&pt);
 
-                // Überprüfen, ob die Maus mindestens 10 Pixel verschoben wurde
-                if (prevPt.x == -1 || prevPt.y == -1 || abs(pt.x - prevPt.x) >= 10 || abs(pt.y - prevPt.y) >= 10) {
-                    // Mausposition aktualisieren
-                    prevPt = pt;
+                    // Überprüfen, ob die Maus mindestens 3 Pixel verschoben wurde
+                    if (prevPt.x == -1 || prevPt.y == -1 || abs(pt.x - prevPt.x) >= 3 || abs(pt.y - prevPt.y) >= 3) {
+                        // Mausposition aktualisieren
+                        prevPt = pt;
 
-                    ScreenToClient(hwnd, &pt); 
+                        ScreenToClient(hwnd, &pt);
 
-                    int yPos = 0 - scrollPos + 0;
-                    int newHighlightedRow = -1;
-                    int newHighlightedWindowRow = -1;
+                        int yPos = 0 - scrollPos + heightToolbar;
+                        int newHighlightedRow = -1;
+                        int newHighlightedWindowRow = -1;
 
-                    for (size_t i = 0; i < processNames.size(); ++i) {
-                        const auto& processName = processNames[i];
-                        RECT rect = {-30, yPos, textWidth, yPos + 30 };
-                        if (PtInRect(&rect, pt)) {
-                            newHighlightedRow = i;
-                            TOOLINFOW ti = { 0 }; 
-                            ti.cbSize = sizeof(TOOLINFOW);
-                            ti.uFlags = TTF_SUBCLASS;
-                            ti.hwnd = hwnd;
-                            ti.hinst = GetModuleHandle(NULL);
-                            ti.lpszText = const_cast<LPWSTR>(processName.c_str()); 
-                            ti.rect = rect;
-                            //SendMessage(hwndTT, TTM_ADDTOOL, 0, (LPARAM)&ti);  // tooltip does not yet work correctly. Shows only first letter of the name
-                            //SendMessage(hwndTT, TTM_SETMAXTIPWIDTH, 0, 300);  // tooltip does not yet work correctly. Shows only first letter of the name
-                            //SendMessage(hwndTT, TTM_UPDATETIPTEXT, 0, (LPARAM)&ti);  // tooltip does not yet work correctly. Shows only first letter of the name
-                            break;
-                        }
-                        yPos += 30;
-                        if (expandedState[processName]) {
-                            auto& windows = processWindowsMap[processName];
-                            for (size_t j = 0; j < windows.size(); ++j) {
-                                const auto& window = windows[j];
-                                if (window.visible || window.checked) {
-                                    RECT windowRect = {-30, yPos, textWidth, yPos + 30 };
-                                    if (PtInRect(&windowRect, pt)) {
-                                        newHighlightedWindowRow = i*100000+j;
-                                        newHighlightedRow = i;
-                                        break;
+                        for (size_t i = 0; i < processNames.size(); ++i) {
+                            const auto& processName = processNames[i];
+                            RECT rect = { -30, yPos, textWidth, yPos + 30 };
+                            if (PtInRect(&rect, pt)) {
+                                newHighlightedRow = i;
+                                TOOLINFOW ti = { 0 };
+                                ti.cbSize = sizeof(TOOLINFOW);
+                                ti.uFlags = TTF_SUBCLASS;
+                                ti.hwnd = hwnd;
+                                ti.hinst = GetModuleHandle(NULL);
+                                ti.lpszText = const_cast<LPWSTR>(processName.c_str());
+                                ti.rect = rect;
+                                //SendMessage(hwndTT, TTM_ADDTOOL, 0, (LPARAM)&ti);  // tooltip does not yet work correctly. Shows only first letter of the name
+                                //SendMessage(hwndTT, TTM_SETMAXTIPWIDTH, 0, 300);  // tooltip does not yet work correctly. Shows only first letter of the name
+                                //SendMessage(hwndTT, TTM_UPDATETIPTEXT, 0, (LPARAM)&ti);  // tooltip does not yet work correctly. Shows only first letter of the name
+                                break;
+                            }
+                            yPos += 30;
+                            if (expandedState[processName]) {
+                                auto& windows = processWindowsMap[processName];
+                                for (size_t j = 0; j < windows.size(); ++j) {
+                                    const auto& window = windows[j];
+                                    if (window.visible || window.checked) {
+                                        RECT windowRect = { -30, yPos, textWidth, yPos + 30 };
+                                        if (PtInRect(&windowRect, pt)) {
+                                            newHighlightedWindowRow = i * 100000 + j;
+                                            newHighlightedRow = i;
+                                            break;
+                                        }
+                                        yPos += 30;
                                     }
-                                    yPos += 30;
                                 }
                             }
                         }
-                    }
 
-                    if (newHighlightedRow != highlightedRow || newHighlightedWindowRow != highlightedWindowRow) {
-                        highlightedRow = newHighlightedRow;
-                        highlightedWindowRow = newHighlightedWindowRow;
-                        InvalidateRect(hwnd, NULL, TRUE);
+                        if (newHighlightedRow != highlightedRow || newHighlightedWindowRow != highlightedWindowRow) {
+                            highlightedRow = newHighlightedRow;
+                            highlightedWindowRow = newHighlightedWindowRow;
+                            InvalidateRect(hwnd, NULL, TRUE);
+                        }
                     }
                 }
-            }
+
         }
         break;
     
@@ -4157,7 +4500,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             si.cbSize = sizeof(si); // Setzen der Größe der Struktur
             si.fMask = SIF_ALL; // Festlegen, dass alle Informationen gesetzt werden
             GetScrollInfo(hwnd, SB_VERT, &si); // Abrufen der aktuellen Scroll-Informationen
-            int yPos = si.nPos - delta / WHEEL_DELTA * 30; // Neue Y-Position berechnen
+            int yPos = si.nPos - delta / std::max(WHEEL_DELTA,1) * 30; // Neue Y-Position berechnen
 
             // Begrenzen der Y-Position
             yPos = std::max(0, std::min(yPos, si.nMax - (int)si.nPage + 1));
@@ -4169,7 +4512,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 RECT scrollRect;
                 GetClientRect(hwnd, &scrollRect);
                 //scrollRect.bottom -= 55; // Bereich ohne grauen Balken
-                ScrollWindowEx(hwnd, 0, delta / WHEEL_DELTA * 30, &scrollRect, &scrollRect, NULL, NULL, SW_INVALIDATE | SW_ERASE); 
+                ScrollWindowEx(hwnd, 0, delta / std::max(WHEEL_DELTA, 1) * 30, &scrollRect, &scrollRect, NULL, NULL, SW_INVALIDATE | SW_ERASE);
                 InvalidateRect(hwnd, &scrollRect, TRUE); // Rechteck ungültig machen und neu zeichnen
             }
         }
@@ -4195,7 +4538,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 
             // Zeichne das UI im Offscreen-Puffer
             int searchBoxHeight = 0; // Höhe des Suchfelds
-            int yPos = searchBoxHeight - scrollPos; // Platz für das Suchfeld und etwas Abstand
+            int yPos = searchBoxHeight - scrollPos + heightToolbar; // Platz für das Suchfeld und etwas Abstand
             int nmbOfItemsOnWindow = 0;
             HFONT hFont = CreateFont(24, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, VARIABLE_PITCH, TEXT("Segoe UI Symbol"));
             HFONT hOldFont = (HFONT)SelectObject(hdcMem, hFont);
@@ -4254,8 +4597,39 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     if (i == highlightedRow && highlightedWindowRow == -1) textBeforeProcessName += checkboxState[processName] ? L" " : L"\u2610 "; // Platzhalter für das Quadrat
                 }
 
-                std::wstring textAfterProcessName = L" (" + std::to_wstring(AlreadyOneChecked) + L" / " + std::to_wstring(windows.size()) + L")";
+                //std::wstring textAfterProcessName = L" (" + std::to_wstring(AlreadyOneChecked) + L" / " + std::to_wstring(windows.size()) + L")\tselected";
+                std::wstringstream ss;
+                if (AlreadyOneChecked == 0) {
+                    ss << L"        (" << std::setw(2) << std::setfill(L'0') << windows.size() << L" windows)";
+                }
+                else {
+                    ss << L" (" << std::setw(2) << std::setfill(L'0') << AlreadyOneChecked
+                        << L" / " << std::setw(2) << std::setfill(L'0') << windows.size() << L" selected)";
+                }
+                std::wstring textAfterProcessName = ss.str();
+                
+                std::wstring textAfterProcessNameAfterNumbers = textAfterProcessName;
 
+                bool listOfCheckedStarted = false;
+                for (auto& window : processWindowsMap[processName]) { // Iterate through all windows of the process
+                    if (window.checked)
+                    {
+                        if (!listOfCheckedStarted)
+                        {
+                            textAfterProcessNameAfterNumbers += L"    ";
+                            listOfCheckedStarted = true;
+                        }
+                        else
+                        {
+                            textAfterProcessNameAfterNumbers += L" ]";
+                        }
+                        textAfterProcessNameAfterNumbers += L"  [ " + window.title;
+                    }
+                }
+                if (listOfCheckedStarted) textAfterProcessNameAfterNumbers += L" ]";
+                
+                int clientWidth = clientRect.right - clientRect.left;
+                textWidth = std::max(clientWidth, minWidth);
                 RECT rect = {10, yPos, textWidth, yPos + 30};
 
                 if (i == highlightedRow && highlightedWindowRow == -1) {
@@ -4343,12 +4717,28 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 SelectObject(hdcMem, hOldFont);
                 DeleteObject(hFontBold);
 
+                // Zuerst den text schwarz schreiben
                 hOldFont = (HFONT)SelectObject(hdcMem, hFontNormal);
+                SetTextColor(hdcMem, RGB(0, 0, 0));
+                /*if (textAfterProcessNameAfterNumbers.length() > 20) {
+                    textAfterProcessNameAfterNumbers = textAfterProcessNameAfterNumbers.substr(0, 20) + L"...";
+                }*/
+                DrawTextW(hdcMem, textAfterProcessNameAfterNumbers.c_str(), -1, &rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+                //SelectObject(hdcMem, hOldFont);
+                //DeleteObject(hFontNormal);
+
+
+                // einen Teil des textes blau/rot darüber schreiben
+                //hOldFont = (HFONT)SelectObject(hdcMem, hFontNormal);
+                //if (textAfterProcessName.find(L"selected") == std::wstring::npos) {
+                    SetTextColor(hdcMem, RGB(0, 0, 255)); // Blue
+                /*}
+                else {
+                    SetTextColor(hdcMem, blinkState ? RGB(0, 0, 255) : RGB(255, 0, 0)); // Blinking between blue and red
+                }*/
                 DrawTextW(hdcMem, textAfterProcessName.c_str(), -1, &rect, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
                 SelectObject(hdcMem, hOldFont);
                 DeleteObject(hFontNormal);
-
-
 
                 //SetWindowPos(expandButtons[processName], HWND_TOPMOST, 10, yPos, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_SHOWWINDOW);
                 // Überprüfe, ob die Position geändert wurde
@@ -4408,15 +4798,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             globalTotalChecked = TotalChecked;
             SetWindowText(hwnd, windowTitle.c_str());
 
+
             // Scroll-Informationen aktualisieren
-            SCROLLINFO si = {}; // Initialize a SCROLLINFO structure
+            /*SCROLLINFO si = {}; // Initialize a SCROLLINFO structure
             si.cbSize = sizeof(si); // Set the size of the SCROLLINFO structure
             si.fMask = SIF_RANGE | SIF_PAGE; // Specify the masks to use
             si.nMin = 0; // Set the minimum scroll range
-            si.nMax = std::max(nmbOfItemsOnWindow * 30, 400);
-            si.nPage = si.nMax / nmbOfItemsOnWindow; // Set the page length for scrolling
+            si.nMax = std::max(nmbOfItemsOnWindow * 30, 100);
+            si.nPage = si.nMax / std::max(nmbOfItemsOnWindow,1); // Set the page length for scrolling
             SetScrollInfo(hwnd, SB_VERT, &si, TRUE); // Set the scroll information for the vertical scrollbar
-
+            */
+            UpdateScrollBar(hwnd, nmbOfItemsOnWindow);
+            UpdateControlPositions(hwnd);
             AdjustWindowSize(hwnd); // Adjust the window size
             /*SetWindowPos(hSearchBox, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
             SetWindowPos(hEraseButton, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
@@ -4471,7 +4864,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     if (wParam == SIZE_MINIMIZED) {
                         KillTimer(hwnd, BLINKING_TIMER_ID); // Timer stoppen
                     } else {
-                        SetTimer(hwnd, BLINKING_TIMER_ID, 250, NULL); // Timer neu starten
+                        SetTimer(hwnd, BLINKING_TIMER_ID, BLINKING_TIMER_ID_time, NULL); // Timer neu starten
                     }
                     // int buttonCount = 4; // Number of buttons
                     // int buttonWidth = (width - 20) / buttonCount; // Calculate the width of a button
@@ -4481,7 +4874,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                     // SetWindowPos(restoreButton, NULL, 10 + buttonWidth + 5, yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
                     // SetWindowPos(closeButton, NULL, 10 + 2 * (buttonWidth + 5), yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
                     // SetWindowPos(arrangeButton, NULL, 10 + 3 * (buttonWidth + 5), yPos + 5 + 5, buttonWidth, 40, SWP_NOZORDER);
-                    UpdateControlPositions(hwnd);
+                    // UpdateControlPositions(hwnd);
+                    SendMessage(hwndToolbar, TB_AUTOSIZE, 0, 0); // Toolbar neu zeichnen
+                    SendMessage(hSearchBox, TB_AUTOSIZE, 0, 0);
+                    SendMessage(hEraseButton, TB_AUTOSIZE, 0, 0);
+                    SendMessage(hGoToButton, TB_AUTOSIZE, 0, 0);
+                    InvalidateRect(hwnd, NULL, TRUE);
                 }
                 break;
         case WM_DESTROY: { // Message when the window is destroyed
@@ -4502,106 +4900,125 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         break;
 
-    case WM_TRAYICON:
-    case WM_HOTKEY: { 
-        //std::cout << "WM_HOTKEY or WM_TRAYICON" << std::endl;
-        if (uMsg == WM_HOTKEY && wParam != HOTKEY_ID) {
-            //std::cout << "Incorrect hotkey ID" << std::endl;
-            break; // Ensure it's the correct hotkey
-        }
-        if (lParam == WM_LBUTTONUP || uMsg == WM_HOTKEY) { 
-            //std::cout << "Restoring window" << std::endl;
+        case WM_TRAYICON:
+        case WM_HOTKEY: { 
+            //std::cout << "WM_HOTKEY or WM_TRAYICON" << std::endl;
+            if (uMsg == WM_HOTKEY && wParam != HOTKEY_ID) {
+                //std::cout << "Incorrect hotkey ID" << std::endl;
+                break; // Ensure it's the correct hotkey
+            }
+            if (lParam == WM_LBUTTONUP || uMsg == WM_HOTKEY) { 
+                //std::cout << "Restoring window" << std::endl;
 
-            // Show the window and bring it to the foreground as early as possible
-            // Get the screen dimensions
-            RECT screenRect;
-            GetWindowRect(GetDesktopWindow(), &screenRect);
-            int screenWidth = screenRect.right;
-            int screenHeight = screenRect.bottom;
+                // Show the window and bring it to the foreground as early as possible
+                windowReady = false;
+                // Get the screen dimensions
+                RECT screenRect;
+                GetWindowRect(GetDesktopWindow(), &screenRect);
+                int screenWidth = screenRect.right;
+                int screenHeight = screenRect.bottom;
 
-            // Get the window dimensions
-            RECT windowRect;
-            GetWindowRect(hwnd, &windowRect);
-            int windowWidth = windowRect.right - windowRect.left;
-            int windowHeight = windowRect.bottom - windowRect.top;
+                // Get the window dimensions
+                RECT windowRect;
+                GetWindowRect(hwnd, &windowRect);
+                int windowWidth = windowRect.right - windowRect.left;
+                int windowHeight = windowRect.bottom - windowRect.top;
 
-            // Calculate the new position to center the window
-            int newX = (screenWidth - windowWidth) / 2;
-            int newY = (screenHeight - windowHeight) / 2;
+                // Calculate the new position to center the window
+                int newX = (screenWidth - windowWidth) / 2;
+                int newY = (screenHeight - windowHeight) / 2;
 
-            // Restore, move, and bring the window to the foreground in one call
-            SetWindowPos(hwnd, HWND_TOP, newX, newY, windowWidth, windowHeight, SWP_SHOWWINDOW);
+                // Restore, move, and bring the window to the foreground in one call
+                SetWindowPos(hwnd, HWND_TOP, newX, newY, windowWidth, windowHeight, SWP_SHOWWINDOW);
 
-            // Perform essential operations           
-            RefreshWindowList(hwnd);
-            //AdjustWindowToFitMenu(hwnd);
-            //UpdateWindowList(hwnd);
+                /*if (!CreateSimpleToolbar(hwnd, ((LPCREATESTRUCT)lParam)->hInstance)) {
+                    MessageBox(hwnd, L"Failed to create toolbar!", L"Error", MB_OK | MB_ICONERROR);
+                    return -1; // Fenstererstellung abbrechen
+                }*/
 
-            // Perform non-essential operations asynchronously
-            std::thread([hwnd]() {
-                AdjustWindowSize(hwnd); 
-                UpdateDynamicMenus(hwnd); 
-                std::vector<BOOL> timerStates(timers.size());
-                RestartTimers(hwnd, timers, timerStates);
-                CreateTrayIcon(hwnd);
+                // Perform essential operations           
+                RefreshWindowList(hwnd);
+                //AdjustWindowToFitMenu(hwnd);
                 //UpdateWindowList(hwnd);
 
-                SCROLLINFO si = {};
-                si.cbSize = sizeof(si);
-                si.fMask = SIF_RANGE | SIF_PAGE;
-                si.nMin = 0;
-                si.nMax =(processNames.size() + 2)  * 30;
-                si.nPage = 100;
-                SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
-                scrollPos = 0;
+                // Perform non-essential operations asynchronously
+                std::thread([hwnd]() {
+                    AdjustWindowSize(hwnd); 
+                    UpdateDynamicMenus(hwnd); 
+                    std::vector<BOOL> timerStates(timers.size());
+                    RestartTimers(hwnd, timers, timerStates);
+                    CreateTrayIcon(hwnd);
+                    //UpdateWindowList(hwnd);
 
-                HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
-                hIcon1 = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MYICON));
+                    SCROLLINFO si = {};
+                    si.cbSize = sizeof(si);
+                    si.fMask = SIF_RANGE | SIF_PAGE;
+                    si.nMin = 0;
+                    si.nMax =(processNames.size() + 2)  * 30;
+                    si.nPage = 100;
+                    SetScrollInfo(hwnd, SB_VERT, &si, TRUE);
+                    scrollPos = 0;
 
-                auto windows = getOpenWindows();
-                for (const auto& processName : processNames) {
-                    auto it = windows.end();
-                    for (auto winIt = windows.begin(); winIt != windows.end(); ++winIt) {
-                        if (winIt->processName == processName) {
-                            it = winIt;
-                            break;
+                    HINSTANCE hInstance = (HINSTANCE)GetWindowLongPtr(hwnd, GWLP_HINSTANCE);
+                    hIcon1 = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_MYICON));
+
+                    auto windows = getOpenWindows();
+                    for (const auto& processName : processNames) {
+                        auto it = windows.end();
+                        for (auto winIt = windows.begin(); winIt != windows.end(); ++winIt) {
+                            if (winIt->processName == processName) {
+                                it = winIt;
+                                break;
+                            }
+                        }
+                        if (it != windows.end()) {
+                            HICON hIcon = ExtractIconW(hInstance, it->exePath.c_str(), 0);
+                            if (hIcon == NULL) {
+                                hIcon = hIcon1;
+                            }
+                            processIcons[processName] = hIcon;
                         }
                     }
-                    if (it != windows.end()) {
-                        HICON hIcon = ExtractIconW(hInstance, it->exePath.c_str(), 0);
-                        if (hIcon == NULL) {
-                            hIcon = hIcon1;
-                        }
-                        processIcons[processName] = hIcon;
-                    }
+
+                    SaveCurrentWindows(); 
+                    ProcessMessages();
+                    //InvalidateWindow(hwnd);
+                    ProcessMessages();
+                    windowReady = true;
+                }).detach();
+                    // Additional actions if needed
+                    //RefreshWindowList(hwnd); 
+                    //ShowWindow(hwnd, SW_RESTORE); 
+                    //MoveWindowToPrimaryMonitor(hwnd);
+                    //SaveCurrentWindows(); 
+                    //AdjustWindowSize(hwnd); 
+                    //AdjustWindowToFitMenu(hwnd);
+                    //ProcessMessages();
+                    //Sleep(150);
+                    //SetForegroundWindow(hwnd); 
+                    //InvalidateWindow(hwnd);
+                    //ProcessMessages();
+                SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(IDC_ERASEBUTTON, 0), 0);
+
+                /*if (!CreateSimpleToolbar(hwnd, ((LPCREATESTRUCT)lParam)->hInstance)) {
+                    MessageBox(hwnd, L"Failed to create toolbar!", L"Error", MB_OK | MB_ICONERROR);
+                    return -1; // Fenstererstellung abbrechen
+                }*/
+
+                // Toolbar wieder sichtbar machen
+                if (hwndToolbar) {
+                    ShowWindow(hwndToolbar, SW_SHOW);
                 }
+                else
+                    MessageBox(hwnd, L"kann toolbar nicht wieder sichtbar machen", L"Error", MB_OK | MB_ICONERROR);
 
-                SaveCurrentWindows(); 
-                ProcessMessages();
-                //InvalidateWindow(hwnd);
-                ProcessMessages();
-            }).detach();
-                // Additional actions if needed
-                //RefreshWindowList(hwnd); 
-                //ShowWindow(hwnd, SW_RESTORE); 
-                //MoveWindowToPrimaryMonitor(hwnd);
-                //SaveCurrentWindows(); 
-                //AdjustWindowSize(hwnd); 
-                //AdjustWindowToFitMenu(hwnd);
-                //ProcessMessages();
-                //Sleep(150);
-                //SetForegroundWindow(hwnd); 
-                //InvalidateWindow(hwnd);
-                //ProcessMessages();
-            SendMessage(hwnd, WM_COMMAND, MAKEWPARAM(IDC_ERASEBUTTON, 0), 0);
-            SetForegroundWindow(hwnd);
-            SetFocus(hwnd);
-        } else if (lParam == WM_RBUTTONUP) { 
-            ShowTrayMenu(hwnd); 
+                SetForegroundWindow(hwnd);
+                SetFocus(hwnd);
+            } else if (lParam == WM_RBUTTONUP) { 
+                ShowTrayMenu(hwnd); 
+            }
         }
-    }
-    break;
-
+        break;
 
         default: { // Default message
             //std::cout << "default" << std::endl;
@@ -4628,7 +5045,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     const wchar_t CLASS_NAME[] = L"SampleWindowClass"; // Define the class name for the window
 
-    WNDCLASSW wc = { }; // Initialize a WNDCLASSA structure
+    WNDCLASSW wc = { }; // Initialize a WNDCLASSW structure
     wc.lpfnWndProc = WindowProc; // Set the window procedure
     wc.hInstance = hInstance; // Set the instance handle
     wc.lpszClassName = CLASS_NAME; // Set the class name
@@ -4638,12 +5055,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     RegisterClassW(&wc); // Register the window class
 
-    std::wstring windowTitle = L"Many Open Windows - Total Windows Seelcted: " + std::to_wstring(0);
+    std::wstring windowTitle = L"Many Open Windows - Total Windows Selected: " + std::to_wstring(0);
     HWND hwnd = CreateWindowExW(
         0, // Extended window style
         CLASS_NAME, // Name of the window class
         windowTitle.c_str(), // Window title
-        WS_OVERLAPPED | WS_SYSMENU | WS_VSCROLL | WS_EX_COMPOSITED, // Window style. 
+        WS_OVERLAPPED | WS_SYSMENU | WS_VSCROLL | WS_EX_COMPOSITED | WS_SIZEBOX, // Window style
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, // Position and size of the window
         NULL, // No parent window
         NULL, // No menu

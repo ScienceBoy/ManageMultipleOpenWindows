@@ -1,9 +1,22 @@
 #include "resource.h"
 
 IDI_MYICON ICON "icon.ico"
+IDI_ICON_MINIMIZE_contextmenu ICON "minimize_contextmenu.ico"
+IDI_ICON_ARRANGE_contextmenu ICON "arrange_contextmenu.ico"
+IDI_ICON_CLOSE_contextmenu ICON "close_contextmenu.ico"
 IDI_ICON_MINIMIZE ICON "minimize.ico"
 IDI_ICON_ARRANGE ICON "arrange.ico"
 IDI_ICON_CLOSE ICON "close.ico"
+IDI_ICON_ABOUT ICON "about.ico"
+IDI_ICON_EXIT ICON "exit.ico"
+IDI_ICON_MAXIMIZE ICON "maximize.ico"
+IDI_ICON_MOVE ICON "move.ico"
+IDI_ICON_REFRESH ICON "refresh.ico"
+IDI_ICON_RESTORE ICON "restore.ico"
+IDI_ICON_SAVE ICON "save.ico"
+IDI_ICON_SELECTALL ICON "selectAll.ico"
+IDI_ICON_UNSELECTALL ICON "unselectAll.ico"
+IDI_ICON_SELECTONSCREEN ICON "selectOnScreen.ico"
 
 IDR_MAINMENU MENU
 BEGIN
